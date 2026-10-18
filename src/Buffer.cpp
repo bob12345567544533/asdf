@@ -1,4 +1,5 @@
 #include "Buffer.hpp"
+#include "Menu.hpp"
 #include "Overlay.hpp"
 
 #include <algorithm>
@@ -139,10 +140,21 @@ SimResult simulate(SimSetup const& s, int delay) {
         auto ghost = g.ghosts[i];
         auto real = s.reals[i];
 
-        ghost->spawnFromPlayer(real, false);
-        ghost->setVisible(false);
-        ghost->m_gravityMod = real->m_gravityMod;
+        // Copy the state with plain field writes. Helper functions like
+        // spawnFromPlayer also run gravity-flip, velocity-change and visibility
+        // logic, which can leave traces on the real level.
+        ghost->copyAttributes(real);
+        ghost->setPosition(real->getPosition());
+        ghost->setRotation(real->getRotation());
+        ghost->m_yVelocity = real->m_yVelocity;
+        ghost->m_fallSpeed = real->m_fallSpeed;
+        ghost->m_isUpsideDown = real->m_isUpsideDown;
         ghost->m_isOnGround = real->m_isOnGround;
+        ghost->m_isOnSlope = real->m_isOnSlope;
+        ghost->m_wasOnSlope = real->m_wasOnSlope;
+        ghost->m_vehicleSize = real->m_vehicleSize;
+        ghost->m_playerSpeed = real->m_playerSpeed;
+        ghost->m_gravityMod = real->m_gravityMod;
         ghost->m_isPlatformer = real->m_isPlatformer;
         ghost->m_holdingLeft = real->m_holdingLeft;
         ghost->m_holdingRight = real->m_holdingRight;
@@ -162,7 +174,10 @@ SimResult simulate(SimSetup const& s, int delay) {
 
     for (int step = 0; step < total; ++step) {
         for (size_t i = 0; i < s.count; ++i) {
-            ghosts[i]->resetCollisionLog(false);
+            ghosts[i]->m_collisionLogTop->removeAllObjects();
+            ghosts[i]->m_collisionLogBottom->removeAllObjects();
+            ghosts[i]->m_collisionLogLeft->removeAllObjects();
+            ghosts[i]->m_collisionLogRight->removeAllObjects();
             s.layer->checkCollisions(ghosts[i], s.dt, false);
             if (g_simDied) return { true, step };
         }
@@ -178,7 +193,6 @@ SimResult simulate(SimSetup const& s, int delay) {
 
         for (size_t i = 0; i < s.count; ++i) {
             ghosts[i]->update(s.dt);
-            ghosts[i]->updateSpecial(s.dt);
             ghosts[i]->updateRotation(s.dt);
         }
         if (g_simDied) return { true, step };
@@ -348,6 +362,10 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
         if (auto overlay = BufferOverlay::get(layer)) {
             overlay->showBuffered(earlyMs, delay, mainMode, !down);
         }
+        menu::log(fmt::format(
+            "+{} tick{} ({:.1f} ms)  {} {}",
+            delay, delay == 1 ? "" : "s", earlyMs, modeName(mainMode), down ? "press" : "release"
+        ));
         return true;
     }
 

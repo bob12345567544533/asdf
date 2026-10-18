@@ -15,6 +15,8 @@ using namespace geode::prelude;
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <ctime>
+#include <deque>
 #include <string>
 #include <thread>
 
@@ -45,27 +47,36 @@ const gp::Color COL_ACCENT(255, 0x7a, 0xde, 0x2d);
 const gp::Color COL_CLOSE_HOVER(255, 0xc4, 0x2b, 0x1c);
 
 constexpr int MAX_TICKS = 24;
+constexpr int TOGGLE_COUNT = 5;
+constexpr size_t LOG_LINES = 10;
 
 // Layout in logical pixels (scaled by DPI when drawn).
 constexpr float W = 340.f;
-constexpr float H = 384.f;
 constexpr float TITLE_H = 40.f;
 constexpr float PAD = 12.f;
+constexpr float GAP = 8.f;
 
-constexpr float SLIDER_CARD_Y = 48.f;
+constexpr float SLIDER_CARD_Y = TITLE_H + GAP;
 constexpr float SLIDER_CARD_H = 92.f;
 constexpr float SLIDER_X0 = PAD + 18.f;
 constexpr float SLIDER_X1 = W - PAD - 64.f;
 constexpr float SLIDER_Y = SLIDER_CARD_Y + 64.f;
 
-constexpr float TOGGLE_CARD_Y = SLIDER_CARD_Y + SLIDER_CARD_H + 8.f;
 constexpr float ROW_H = 38.f;
-constexpr int TOGGLE_COUNT = 5;
+constexpr float TOGGLE_CARD_Y = SLIDER_CARD_Y + SLIDER_CARD_H + GAP;
+constexpr float TOGGLE_CARD_H = ROW_H * TOGGLE_COUNT + 8.f;
 
-enum class Item { None, Close, Slider, Toggle0 };
+constexpr float LOG_LINE_H = 18.f;
+constexpr float LOG_CARD_Y = TOGGLE_CARD_Y + TOGGLE_CARD_H + GAP;
+constexpr float LOG_CARD_H = 34.f + LOG_LINE_H * LOG_LINES + 8.f;
+
+constexpr float H = LOG_CARD_Y + LOG_CARD_H + 34.f;
 
 constexpr UINT WM_PB_SHOW = WM_APP + 1;
 constexpr UINT WM_PB_HIDE = WM_APP + 2;
+constexpr UINT WM_PB_LOG = WM_APP + 3;
+constexpr UINT WM_PB_OPEN = WM_APP + 4;
+constexpr UINT WM_PB_SYNC = WM_APP + 5;
 
 // WDA_EXCLUDEFROMCAPTURE, spelled out for older SDK headers.
 constexpr DWORD EXCLUDE_FROM_CAPTURE = 0x00000011;
@@ -77,6 +88,9 @@ constexpr DWORD EXCLUDE_FROM_CAPTURE = 0x00000011;
 struct Values {
     int ticks = 2;
     bool toggles[TOGGLE_COUNT] { true, true, false, true, false };
+    bool hasPos = false;
+    int x = 0;
+    int y = 0;
 };
 
 constexpr char const* TOGGLE_KEYS[TOGGLE_COUNT] {
@@ -92,8 +106,10 @@ std::atomic<bool> g_started = false;
 
 // Only touched on the window thread.
 Values g_values;
-int g_hover = -1; // index into hit targets, see hitTest()
+std::deque<std::wstring> g_log;
+int g_hover = -1; // see hitTest()
 bool g_dragging = false;
+bool g_placed = false;
 float g_scale = 1.f;
 
 // Settings are only read and written on the main thread.
@@ -102,6 +118,9 @@ Values readSettings() {
     Values v;
     v.ticks = static_cast<int>(mod->getSettingValue<int64_t>("buffer-ticks"));
     for (int i = 0; i < TOGGLE_COUNT; ++i) v.toggles[i] = mod->getSettingValue<bool>(TOGGLE_KEYS[i]);
+    v.hasPos = mod->getSavedValue<bool>("window-has-pos", false);
+    v.x = static_cast<int>(mod->getSavedValue<int64_t>("window-x", 0));
+    v.y = static_cast<int>(mod->getSavedValue<int64_t>("window-y", 0));
     return v;
 }
 
@@ -117,11 +136,25 @@ void save() {
     queueInMainThread([copy] { writeSettings(copy); });
 }
 
+void savePosition(HWND wnd) {
+    RECT r;
+    if (!GetWindowRect(wnd, &r)) return;
+    int x = r.left;
+    int y = r.top;
+    queueInMainThread([x, y] {
+        auto mod = Mod::get();
+        mod->setSavedValue<bool>("window-has-pos", true);
+        mod->setSavedValue<int64_t>("window-x", x);
+        mod->setSavedValue<int64_t>("window-y", y);
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Geometry
 // ---------------------------------------------------------------------------
 
 gp::RectF closeRect() { return { W - 40.f, 8.f, 28.f, 24.f }; }
+gp::RectF minimizeRect() { return { W - 72.f, 8.f, 28.f, 24.f }; }
 gp::RectF sliderHitRect() { return { SLIDER_X0 - 10.f, SLIDER_Y - 14.f, SLIDER_X1 - SLIDER_X0 + 20.f, 28.f }; }
 gp::RectF toggleRowRect(int i) { return { PAD, TOGGLE_CARD_Y + 4.f + i * ROW_H, W - PAD * 2, ROW_H }; }
 
@@ -134,12 +167,18 @@ int ticksAt(float x) {
     return std::clamp(static_cast<int>(std::lround(t * MAX_TICKS)), 0, MAX_TICKS);
 }
 
-// Hit targets: 0 = close, 1 = slider, 2.. = toggles.
+// Hit targets: 0 = close, 1 = slider, 2..6 = toggles, 7 = minimize.
+constexpr int HIT_CLOSE = 0;
+constexpr int HIT_SLIDER = 1;
+constexpr int HIT_TOGGLE = 2;
+constexpr int HIT_MINIMIZE = 7;
+
 int hitTest(float x, float y) {
-    if (closeRect().Contains(x, y)) return 0;
-    if (sliderHitRect().Contains(x, y)) return 1;
+    if (closeRect().Contains(x, y)) return HIT_CLOSE;
+    if (minimizeRect().Contains(x, y)) return HIT_MINIMIZE;
+    if (sliderHitRect().Contains(x, y)) return HIT_SLIDER;
     for (int i = 0; i < TOGGLE_COUNT; ++i) {
-        if (toggleRowRect(i).Contains(x, y)) return 2 + i;
+        if (toggleRowRect(i).Contains(x, y)) return HIT_TOGGLE + i;
     }
     return -1;
 }
@@ -164,28 +203,34 @@ void fillRound(gp::Graphics& g, gp::Color color, gp::RectF r, float radius) {
     g.FillPath(&brush, &path);
 }
 
-void strokeRound(gp::Graphics& g, gp::Color color, gp::RectF r, float radius, float width = 1.f) {
+void strokeRound(gp::Graphics& g, gp::Color color, gp::RectF r, float radius) {
     gp::GraphicsPath path;
     roundRect(path, r, radius);
-    gp::Pen pen(color, width);
+    gp::Pen pen(color, 1.f);
     g.DrawPath(&pen, &path);
 }
 
+void card(gp::Graphics& g, gp::RectF r, bool hover = false) {
+    fillRound(g, hover ? COL_CARD_HOVER : COL_CARD, r, 6.f);
+    strokeRound(g, COL_BORDER, r, 6.f);
+}
+
 void text(gp::Graphics& g, std::wstring const& s, float size, gp::Color color, gp::RectF r,
-          gp::StringAlignment align = gp::StringAlignmentNear, bool bold = false) {
-    gp::FontFamily family(L"Segoe UI");
-    gp::Font font(&family, size, bold ? gp::FontStyleBold : gp::FontStyleRegular, gp::UnitPixel);
+          gp::StringAlignment align = gp::StringAlignmentNear, bool bold = false,
+          wchar_t const* family = L"Segoe UI") {
+    gp::FontFamily fam(family);
+    gp::Font font(&fam, size, bold ? gp::FontStyleBold : gp::FontStyleRegular, gp::UnitPixel);
     gp::SolidBrush brush(color);
     gp::StringFormat fmt;
     fmt.SetAlignment(align);
     fmt.SetLineAlignment(gp::StringAlignmentCenter);
     fmt.SetFormatFlags(gp::StringFormatFlagsNoWrap);
+    fmt.SetTrimming(gp::StringTrimmingEllipsisCharacter);
     g.DrawString(s.c_str(), -1, &font, r, &fmt, &brush);
 }
 
 void drawToggle(gp::Graphics& g, float x, float y, bool on) {
-    gp::RectF track(x, y, 38.f, 20.f);
-    fillRound(g, on ? COL_ACCENT : COL_TRACK, track, 10.f);
+    fillRound(g, on ? COL_ACCENT : COL_TRACK, { x, y, 38.f, 20.f }, 10.f);
     float knobX = on ? x + 38.f - 17.f : x + 3.f;
     gp::SolidBrush knob(on ? gp::Color(255, 0xff, 0xff, 0xff) : COL_MUTED);
     g.FillEllipse(&knob, knobX, y + 3.f, 14.f, 14.f);
@@ -208,12 +253,22 @@ void paint(HWND wnd, HDC target) {
     gp::Pen outline(COL_BORDER, 1.f);
     g.DrawRectangle(&outline, 0.f, 0.f, W - 1.f, H - 1.f);
 
-    // Title bar
+    // Title bar: name, minimize, close
     text(g, L"Input Buffer", 15.f, COL_TEXT, { PAD + 4.f, 0.f, 200.f, TITLE_H }, gp::StringAlignmentNear, true);
-    auto close = closeRect();
-    if (g_hover == 0) fillRound(g, COL_CLOSE_HOVER, close, 4.f);
+
+    auto mini = minimizeRect();
+    if (g_hover == HIT_MINIMIZE) fillRound(g, COL_CARD_HOVER, mini, 4.f);
     {
-        gp::Pen pen(g_hover == 0 ? COL_TEXT : COL_MUTED, 1.5f);
+        gp::Pen pen(g_hover == HIT_MINIMIZE ? COL_TEXT : COL_MUTED, 1.5f);
+        float cy = mini.Y + mini.Height / 2.f;
+        float cx = mini.X + mini.Width / 2.f;
+        g.DrawLine(&pen, cx - 5.f, cy, cx + 5.f, cy);
+    }
+
+    auto close = closeRect();
+    if (g_hover == HIT_CLOSE) fillRound(g, COL_CLOSE_HOVER, close, 4.f);
+    {
+        gp::Pen pen(g_hover == HIT_CLOSE ? COL_TEXT : COL_MUTED, 1.5f);
         float cx = close.X + close.Width / 2.f;
         float cy = close.Y + close.Height / 2.f;
         g.DrawLine(&pen, cx - 5.f, cy - 5.f, cx + 5.f, cy + 5.f);
@@ -221,10 +276,7 @@ void paint(HWND wnd, HDC target) {
     }
 
     // Slider card
-    gp::RectF sliderCard(PAD, SLIDER_CARD_Y, W - PAD * 2, SLIDER_CARD_H);
-    fillRound(g, g_hover == 1 || g_dragging ? COL_CARD_HOVER : COL_CARD, sliderCard, 6.f);
-    strokeRound(g, COL_BORDER, sliderCard, 6.f);
-
+    card(g, { PAD, SLIDER_CARD_Y, W - PAD * 2, SLIDER_CARD_H }, g_hover == HIT_SLIDER || g_dragging);
     text(g, L"Buffer", 14.f, COL_TEXT, { SLIDER_X0, SLIDER_CARD_Y + 10.f, 120.f, 24.f }, gp::StringAlignmentNear, true);
     wchar_t ms[48];
     std::swprintf(ms, 48, L"%.1f ms", g_values.ticks * 1000.0 / 240.0);
@@ -234,27 +286,39 @@ void paint(HWND wnd, HDC target) {
     fillRound(g, COL_TRACK, { SLIDER_X0, SLIDER_Y - 2.f, SLIDER_X1 - SLIDER_X0, 4.f }, 2.f);
     if (tx > SLIDER_X0) fillRound(g, COL_TEXT, { SLIDER_X0, SLIDER_Y - 2.f, tx - SLIDER_X0, 4.f }, 2.f);
     fillRound(g, gp::Color(255, 0xff, 0xff, 0xff), { tx - 4.f, SLIDER_Y - 11.f, 8.f, 22.f }, 4.f);
-
     text(g, std::to_wstring(g_values.ticks), 22.f, COL_TEXT, { SLIDER_X1 + 8.f, SLIDER_Y - 16.f, 46.f, 32.f }, gp::StringAlignmentFar);
 
     // Toggle card
-    gp::RectF toggleCard(PAD, TOGGLE_CARD_Y, W - PAD * 2, ROW_H * TOGGLE_COUNT + 8.f);
-    fillRound(g, COL_CARD, toggleCard, 6.f);
-    strokeRound(g, COL_BORDER, toggleCard, 6.f);
-
+    card(g, { PAD, TOGGLE_CARD_Y, W - PAD * 2, TOGGLE_CARD_H });
     for (int i = 0; i < TOGGLE_COUNT; ++i) {
         auto row = toggleRowRect(i);
-        if (g_hover == 2 + i) fillRound(g, COL_CARD_HOVER, { row.X + 4.f, row.Y + 2.f, row.Width - 8.f, row.Height - 4.f }, 4.f);
+        if (g_hover == HIT_TOGGLE + i) {
+            fillRound(g, COL_CARD_HOVER, { row.X + 4.f, row.Y + 2.f, row.Width - 8.f, row.Height - 4.f }, 4.f);
+        }
         if (i > 0) {
-            gp::Pen sep(gp::Color(255, 0x1b, 0x1b, 0x1b), 1.f);
+            gp::Pen sep(COL_BG, 1.f);
             g.DrawLine(&sep, row.X + 14.f, row.Y, row.X + row.Width - 14.f, row.Y);
         }
         text(g, TOGGLE_NAMES[i], 13.f, COL_TEXT, { row.X + 18.f, row.Y, 220.f, row.Height });
         drawToggle(g, row.X + row.Width - 18.f - 38.f, row.Y + (row.Height - 20.f) / 2.f, g_values.toggles[i]);
     }
 
+    // Live log, newest on top
+    card(g, { PAD, LOG_CARD_Y, W - PAD * 2, LOG_CARD_H });
+    text(g, L"Log", 14.f, COL_TEXT, { SLIDER_X0, LOG_CARD_Y + 6.f, 120.f, 24.f }, gp::StringAlignmentNear, true);
+    if (g_log.empty()) {
+        text(g, L"Nothing yet", 12.f, COL_MUTED, { SLIDER_X0, LOG_CARD_Y + 34.f, W - PAD * 2 - 36.f, LOG_LINE_H });
+    }
+    for (size_t i = 0; i < g_log.size(); ++i) {
+        // Older lines fade out a bit.
+        BYTE fade = static_cast<BYTE>(std::max(90, 240 - static_cast<int>(i) * 16));
+        text(g, g_log[i], 12.f, gp::Color(255, fade, fade, fade),
+             { SLIDER_X0, LOG_CARD_Y + 34.f + i * LOG_LINE_H, W - PAD * 2 - 36.f, LOG_LINE_H },
+             gp::StringAlignmentNear, false, L"Consolas");
+    }
+
     // Footer
-    text(g, L"F7 / Esc to close  ·  scroll or arrows to adjust", 11.f, COL_MUTED,
+    text(g, L"F7 to show / hide  ·  scroll or arrows to adjust", 11.f, COL_MUTED,
          { PAD, H - 30.f, W - PAD * 2, 22.f }, gp::StringAlignmentCenter);
 
     gp::Graphics screen(target);
@@ -265,11 +329,70 @@ void paint(HWND wnd, HDC target) {
 // Window
 // ---------------------------------------------------------------------------
 
+bool isOnScreen(int x, int y) {
+    POINT pt { x + 40, y + 20 };
+    return MonitorFromPoint(pt, MONITOR_DEFAULTTONULL) != nullptr;
+}
+
+BOOL CALLBACK findSecondMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM data) {
+    MONITORINFO info { sizeof(info) };
+    if (GetMonitorInfoW(monitor, &info) && !(info.dwFlags & MONITORINFOF_PRIMARY)) {
+        *reinterpret_cast<RECT*>(data) = info.rcWork;
+        return FALSE; // found one, stop
+    }
+    return TRUE;
+}
+
+// First time the window shows: last saved spot, else the second monitor,
+// else next to the game.
+void place(HWND wnd, Values const& v) {
+    RECT r;
+    GetWindowRect(wnd, &r);
+    int w = r.right - r.left;
+    int h = r.bottom - r.top;
+
+    if (v.hasPos && isOnScreen(v.x, v.y)) {
+        SetWindowPos(wnd, nullptr, v.x, v.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        return;
+    }
+
+    RECT second {};
+    EnumDisplayMonitors(nullptr, nullptr, findSecondMonitor, reinterpret_cast<LPARAM>(&second));
+    if (second.right > second.left) {
+        int x = second.left + (second.right - second.left - w) / 2;
+        int y = second.top + (second.bottom - second.top - h) / 2;
+        SetWindowPos(wnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        return;
+    }
+
+    RECT game {};
+    HWND gameWnd = g_game.load();
+    if (gameWnd && GetWindowRect(gameWnd, &game)) {
+        SetWindowPos(wnd, nullptr, game.left + 40, game.top + 60, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+}
+
+void showWindow(HWND wnd, Values* values) {
+    g_values = *values;
+    if (!g_placed) {
+        place(wnd, *values);
+        g_placed = true;
+    }
+    delete values;
+    g_hover = -1;
+    // Don't steal focus from the game.
+    ShowWindow(wnd, SW_SHOWNOACTIVATE);
+    InvalidateRect(wnd, nullptr, FALSE);
+}
+
 void hide(HWND wnd) {
     g_dragging = false;
     ReleaseCapture();
+    bool hadFocus = GetForegroundWindow() == wnd;
     ShowWindow(wnd, SW_HIDE);
-    if (HWND game = g_game.load()) SetForegroundWindow(game);
+    if (hadFocus) {
+        if (HWND game = g_game.load()) SetForegroundWindow(game);
+    }
 }
 
 void setTicks(HWND wnd, int ticks, bool commit) {
@@ -286,25 +409,43 @@ float logicalY(LPARAM lParam) { return GET_Y_LPARAM(lParam) / g_scale; }
 
 LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
-        case WM_PB_SHOW: {
-            auto values = reinterpret_cast<Values*>(lParam);
-            g_values = *values;
-            delete values;
-            g_hover = -1;
+        case WM_PB_SHOW:
+            showWindow(wnd, reinterpret_cast<Values*>(lParam));
+            return 0;
 
-            RECT game {};
-            HWND gameWnd = g_game.load();
-            if (gameWnd && GetWindowRect(gameWnd, &game)) {
-                SetWindowPos(wnd, HWND_TOPMOST, game.left + 40, game.top + 60, 0, 0, SWP_NOSIZE);
+        case WM_PB_OPEN: {
+            auto values = reinterpret_cast<Values*>(lParam);
+            if (IsWindowVisible(wnd)) {
+                delete values;
+                return 0;
             }
-            ShowWindow(wnd, SW_SHOW);
-            SetForegroundWindow(wnd);
-            InvalidateRect(wnd, nullptr, FALSE);
+            showWindow(wnd, values);
             return 0;
         }
+
         case WM_PB_HIDE:
             hide(wnd);
             return 0;
+
+        case WM_PB_SYNC: {
+            auto values = reinterpret_cast<Values*>(lParam);
+            if (!g_dragging) {
+                g_values.ticks = values->ticks;
+                for (int i = 0; i < TOGGLE_COUNT; ++i) g_values.toggles[i] = values->toggles[i];
+                InvalidateRect(wnd, nullptr, FALSE);
+            }
+            delete values;
+            return 0;
+        }
+
+        case WM_PB_LOG: {
+            auto line = reinterpret_cast<std::wstring*>(lParam);
+            g_log.push_front(std::move(*line));
+            delete line;
+            while (g_log.size() > LOG_LINES) g_log.pop_back();
+            if (IsWindowVisible(wnd)) InvalidateRect(wnd, nullptr, FALSE);
+            return 0;
+        }
 
         case WM_NCHITTEST: {
             // Drag the window by its title bar.
@@ -312,9 +453,13 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             ScreenToClient(wnd, &pt);
             float x = pt.x / g_scale;
             float y = pt.y / g_scale;
-            if (y < TITLE_H && !closeRect().Contains(x, y)) return HTCAPTION;
+            if (y < TITLE_H && !closeRect().Contains(x, y) && !minimizeRect().Contains(x, y)) return HTCAPTION;
             return HTCLIENT;
         }
+
+        case WM_EXITSIZEMOVE:
+            savePosition(wnd);
+            return 0;
 
         case WM_ERASEBKGND:
             return 1;
@@ -355,16 +500,19 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             float x = logicalX(lParam);
             float y = logicalY(lParam);
             int hit = hitTest(x, y);
-            if (hit == 0) {
+            if (hit == HIT_CLOSE) {
                 hide(wnd);
             }
-            else if (hit == 1) {
+            else if (hit == HIT_MINIMIZE) {
+                ShowWindow(wnd, SW_MINIMIZE);
+            }
+            else if (hit == HIT_SLIDER) {
                 g_dragging = true;
                 SetCapture(wnd);
                 setTicks(wnd, ticksAt(x), false);
             }
-            else if (hit >= 2) {
-                g_values.toggles[hit - 2] = !g_values.toggles[hit - 2];
+            else if (hit >= HIT_TOGGLE && hit < HIT_TOGGLE + TOGGLE_COUNT) {
+                g_values.toggles[hit - HIT_TOGGLE] = !g_values.toggles[hit - HIT_TOGGLE];
                 InvalidateRect(wnd, nullptr, FALSE);
                 save();
             }
@@ -411,7 +559,7 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 }
 
 void roundCorners(HWND wnd) {
-    // Windows 11 rounded corners, loaded at runtime so nothing extra is linked.
+    // Windows 11 rounded corners + dark frame, loaded at runtime so nothing extra is linked.
     if (auto dwm = LoadLibraryW(L"dwmapi.dll")) {
         using Fn = HRESULT(WINAPI*)(HWND, DWORD, LPCVOID, DWORD);
         if (auto set = reinterpret_cast<Fn>(GetProcAddress(dwm, "DwmSetWindowAttribute"))) {
@@ -440,14 +588,15 @@ void windowThread() {
     cls.lpfnWndProc = windowProc;
     cls.hInstance = instance;
     cls.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512)); // IDC_ARROW
-    cls.lpszClassName = L"InputBufferQuickSettings";
+    cls.lpszClassName = L"InputBufferWindow";
     RegisterClassW(&cls);
 
     int pw = static_cast<int>(std::lround(W * g_scale));
     int ph = static_cast<int>(std::lround(H * g_scale));
 
+    // A normal app window (own taskbar button) so it can live on another monitor.
     HWND wnd = CreateWindowExW(
-        WS_EX_TOPMOST | WS_EX_TOOLWINDOW, cls.lpszClassName, L"Input Buffer", WS_POPUP,
+        WS_EX_APPWINDOW, cls.lpszClassName, L"Input Buffer", WS_POPUP | WS_MINIMIZEBOX | WS_SYSMENU,
         CW_USEDEFAULT, CW_USEDEFAULT, pw, ph, nullptr, nullptr, instance, nullptr
     );
     if (!wnd) {
@@ -470,26 +619,67 @@ void windowThread() {
     }
 }
 
+HWND ensureWindow() {
+    if (!g_started.exchange(true)) {
+        std::thread(windowThread).detach();
+        // First time only: give the window a moment to be created.
+        for (int i = 0; i < 100 && !g_window.load() && g_started.load(); ++i) Sleep(5);
+    }
+    return g_window.load();
+}
+
+void rememberGameWindow(HWND wnd) {
+    HWND fg = GetForegroundWindow();
+    if (fg && fg != wnd) g_game = fg;
+}
+
 } // namespace
 
 void toggle() {
-    if (!g_started.exchange(true)) {
-        std::thread(windowThread).detach();
-        // First press only: give the window a moment to be created.
-        for (int i = 0; i < 100 && !g_window.load() && g_started.load(); ++i) Sleep(5);
-    }
-
-    HWND wnd = g_window.load();
+    HWND wnd = ensureWindow();
     if (!wnd) return;
 
-    if (IsWindowVisible(wnd)) {
+    if (IsWindowVisible(wnd) && !IsIconic(wnd)) {
         PostMessageW(wnd, WM_PB_HIDE, 0, 0);
         return;
     }
+    if (IsIconic(wnd)) ShowWindowAsync(wnd, SW_RESTORE);
 
-    HWND fg = GetForegroundWindow();
-    if (fg && fg != wnd) g_game = fg;
+    rememberGameWindow(wnd);
     PostMessageW(wnd, WM_PB_SHOW, 0, reinterpret_cast<LPARAM>(new Values(readSettings())));
+}
+
+void open() {
+    HWND wnd = ensureWindow();
+    if (!wnd) return;
+    rememberGameWindow(wnd);
+    PostMessageW(wnd, WM_PB_OPEN, 0, reinterpret_cast<LPARAM>(new Values(readSettings())));
+}
+
+void sync() {
+    HWND wnd = g_window.load();
+    if (!wnd) return;
+    auto values = new Values(readSettings());
+    if (!PostMessageW(wnd, WM_PB_SYNC, 0, reinterpret_cast<LPARAM>(values))) delete values;
+}
+
+void log(std::string const& line) {
+    HWND wnd = g_window.load();
+    if (!wnd) return;
+
+    // Prefix with the time, like the old console did.
+    std::time_t now = std::time(nullptr);
+    std::tm local {};
+    localtime_s(&local, &now);
+    char stamp[16];
+    std::strftime(stamp, sizeof(stamp), "%H:%M:%S", &local);
+
+    std::string full = std::string(stamp) + "  " + line;
+    int len = MultiByteToWideChar(CP_UTF8, 0, full.c_str(), static_cast<int>(full.size()), nullptr, 0);
+    auto wide = new std::wstring(static_cast<size_t>(len), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, full.c_str(), static_cast<int>(full.size()), wide->data(), len);
+
+    if (!PostMessageW(wnd, WM_PB_LOG, 0, reinterpret_cast<LPARAM>(wide))) delete wide;
 }
 
 } // namespace pb::menu
@@ -501,6 +691,12 @@ namespace pb::menu {
 void toggle() {
     openSettingsPopup(Mod::get(), false);
 }
+
+void open() {}
+
+void sync() {}
+
+void log(std::string const&) {}
 
 } // namespace pb::menu
 

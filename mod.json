@@ -8,7 +8,7 @@
 	},
 	"id": "lilwc.input-buffer",
 	"name": "Input Buffer",
-	"version": "v2.2.0",
+	"version": "v2.3.0",
 	"developer": "lilWC",
 	"description": "Input timing tweaks.",
 	"tags": ["gameplay"],
@@ -46,9 +46,14 @@
 		},
 		"menu-key": {
 			"type": "keybind",
-			"name": "Menu Key",
+			"name": "Window Key",
 			"default": "F7",
 			"category": "universal"
+		},
+		"open-window": {
+			"type": "bool",
+			"name": "Open Window On Launch",
+			"default": true
 		},
 		"display-title": {
 			"type": "title",

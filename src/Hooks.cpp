@@ -140,8 +140,8 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
 
     void flipGravity(PlayerObject* player, bool flip, bool noEffects) {
         if (pb::g_simulating) {
-            // Keep the physics, skip the level-wide effects.
-            if (player) player->flipGravity(flip, true);
+            // Keep the physics, skip everything else.
+            if (player) player->m_isUpsideDown = flip;
             return;
         }
         GJBaseGameLayer::flipGravity(player, flip, noEffects);
@@ -212,6 +212,8 @@ $on_mod(Loaded) {
             pb::flushChannel(pl, 1);
         }
 
+        pb::menu::log(enabled ? "Buffer ON" : "Buffer OFF");
+
         if (auto overlay = pb::BufferOverlay::get(pl)) {
             overlay->showToggle(enabled);
         }
@@ -229,5 +231,11 @@ $on_mod(Loaded) {
 
     listenForAllSettingChanges([](std::string_view, std::shared_ptr<SettingV3>) {
         if (auto overlay = pb::BufferOverlay::get(PlayLayer::get())) overlay->refresh();
+        pb::menu::sync();
     });
+}
+
+// Open the window when the game starts, like the old console did.
+$on_game(Loaded) {
+    if (Mod::get()->getSettingValue<bool>("open-window")) pb::menu::open();
 }

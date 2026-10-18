@@ -1,3 +1,7 @@
+# v2.3.0
+- The window is now a normal standalone window you can park on a second monitor. It opens on launch (can be turned off), remembers where you put it, and has a live log of saved inputs.
+- The ghost player is set up with plain copies again, like v1, instead of helper functions that touched more game state.
+
 # v2.2.0
 - One tick slider for every gamemode instead of a value per mode.
 - New dark menu with a slider and toggles (F7).
