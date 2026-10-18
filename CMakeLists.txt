@@ -8,7 +8,7 @@ else()
 endif()
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
-project(PredictiveBuffer VERSION 2.1.0)
+project(InputBuffer VERSION 2.2.0)
 
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS src/*.cpp)
 
@@ -21,5 +21,9 @@ else()
 endif()
 
 add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
+
+if (WIN32)
+    target_link_libraries(${PROJECT_NAME} gdiplus)
+endif()
 
 setup_geode_mod(${PROJECT_NAME})

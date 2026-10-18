@@ -217,7 +217,7 @@ $on_mod(Loaded) {
         }
         else {
             Notification::create(
-                enabled ? "Predictive Buffer ON" : "Predictive Buffer OFF",
+                enabled ? "Buffer ON" : "Buffer OFF",
                 enabled ? NotificationIcon::Success : NotificationIcon::Info
             )->show();
         }

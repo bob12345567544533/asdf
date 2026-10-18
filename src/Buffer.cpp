@@ -40,20 +40,6 @@ char const* modeName(Mode mode) {
     return "?";
 }
 
-static char const* modeSettingKey(Mode mode) {
-    switch (mode) {
-        case Mode::Cube: return "cube-ms";
-        case Mode::Ship: return "ship-ms";
-        case Mode::Ball: return "ball-ms";
-        case Mode::Ufo: return "ufo-ms";
-        case Mode::Wave: return "wave-ms";
-        case Mode::Robot: return "robot-ms";
-        case Mode::Spider: return "spider-ms";
-        case Mode::Swing: return "swing-ms";
-    }
-    return "cube-ms";
-}
-
 bool isFlyingMode(Mode mode) {
     return mode == Mode::Ship || mode == Mode::Ufo || mode == Mode::Wave || mode == Mode::Swing;
 }
@@ -302,7 +288,12 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
     // stricter one wins.
     double perTick = tickMs(layer);
     bool bufferReleases = setting<bool>("buffer-releases");
-    int limit = MAX_DELAY_TICKS;
+    bool bufferShip = setting<bool>("buffer-ship");
+
+    // The setting is in 240 TPS ticks. Turn it into real time so it means the
+    // same thing if you change TPS.
+    double maxMs = static_cast<double>(setting<int64_t>("buffer-ticks")) * 1000.0 / 240.0;
+    int limit = std::min(MAX_DELAY_TICKS, msToTicks(maxMs, perTick));
     bool anyWave = false;
     bool anyMini = false;
     bool anyFlying = false;
@@ -313,7 +304,7 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
         Mode mode = modeOf(p);
         if (!down && (!bufferReleases || !releaseMatters(mode))) return false;
 
-        limit = std::min(limit, msToTicks(setting<double>(modeSettingKey(mode)), perTick));
+        if (mode == Mode::Ship && !bufferShip) return false;
         anyWave |= mode == Mode::Wave;
         anyMini |= p->m_vehicleSize < 1.f;
         anyFlying |= isFlyingMode(mode);

@@ -4,7 +4,7 @@ using namespace geode::prelude;
 
 namespace pb {
 
-static constexpr char const* OVERLAY_ID = "predictive-buffer-overlay";
+static constexpr char const* OVERLAY_ID = "input-buffer-overlay";
 
 BufferOverlay* BufferOverlay::create() {
     auto ret = new BufferOverlay();
@@ -101,7 +101,7 @@ void BufferOverlay::showBuffered(double earlyMs, int ticks, Mode mode, bool rele
 
 void BufferOverlay::showToggle(bool enabled) {
     this->refresh();
-    m_feedback->setString(enabled ? "Predictive Buffer ON" : "Predictive Buffer OFF");
+    m_feedback->setString(enabled ? "Buffer ON" : "Buffer OFF");
     m_feedback->setColor(enabled ? ccColor3B { 120, 255, 140 } : ccColor3B { 255, 120, 120 });
 
     auto opacity = static_cast<GLubyte>(Mod::get()->getSettingValue<int64_t>("label-opacity"));

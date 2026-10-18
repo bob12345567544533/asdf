@@ -9,38 +9,60 @@ using namespace geode::prelude;
 #ifdef GEODE_IS_WINDOWS
 
 #include <Windows.h>
+#include <windowsx.h>
+#include <objidl.h>
 
 #include <algorithm>
-#include <array>
 #include <atomic>
-#include <cwchar>
+#include <cmath>
+#include <string>
 #include <thread>
+
+// gdiplus.h wants min/max, which NOMINMAX removes.
+namespace Gdiplus {
+    using std::max;
+    using std::min;
+}
+#include <gdiplus.h>
 
 namespace pb::menu {
 namespace {
 
-constexpr int MODE_COUNT = 8;
-constexpr std::array<char const*, MODE_COUNT> MODE_KEYS {
-    "cube-ms", "ship-ms", "ball-ms", "ufo-ms", "wave-ms", "robot-ms", "spider-ms", "swing-ms"
-};
-constexpr std::array<wchar_t const*, MODE_COUNT> MODE_NAMES {
-    L"Cube", L"Ship", L"Ball", L"UFO", L"Wave", L"Robot", L"Spider", L"Swing"
-};
-constexpr int SHIP_INDEX = 1;
+namespace gp = Gdiplus;
 
-// The old F6 stages, in ms (2, 4, 8 and 16 steps at 240 TPS).
-constexpr std::array<double, 4> PRESETS { 8.5, 17.0, 33.5, 67.0 };
-constexpr std::array<wchar_t const*, 4> PRESET_LABELS { L"2 ticks", L"4 ticks", L"8 ticks", L"16 ticks" };
+// ---------------------------------------------------------------------------
+// Look (colors taken from the GD Clean texture pack)
+// ---------------------------------------------------------------------------
 
-// Control IDs. IDOK / IDCANCEL make Enter apply and Esc close.
-constexpr int ID_APPLY = IDOK;
-constexpr int ID_CLOSE = IDCANCEL;
-constexpr int ID_ENABLED = 100;
-constexpr int ID_RELEASES = 101;
-constexpr int ID_FEEDBACK = 102;
-constexpr int ID_STATS = 103;
-constexpr int ID_MS_BASE = 200;
-constexpr int ID_PRESET_BASE = 300;
+const gp::Color COL_BG(255, 0x1b, 0x1b, 0x1b);
+const gp::Color COL_CARD(255, 0x22, 0x22, 0x22);
+const gp::Color COL_CARD_HOVER(255, 0x2a, 0x2a, 0x2a);
+const gp::Color COL_BORDER(255, 0x00, 0x00, 0x00);
+const gp::Color COL_TEXT(255, 0xf0, 0xf0, 0xf0);
+const gp::Color COL_MUTED(255, 0x9a, 0x9a, 0x9a);
+const gp::Color COL_TRACK(255, 0x3a, 0x3a, 0x3a);
+const gp::Color COL_ACCENT(255, 0x7a, 0xde, 0x2d);
+const gp::Color COL_CLOSE_HOVER(255, 0xc4, 0x2b, 0x1c);
+
+constexpr int MAX_TICKS = 24;
+
+// Layout in logical pixels (scaled by DPI when drawn).
+constexpr float W = 340.f;
+constexpr float H = 384.f;
+constexpr float TITLE_H = 40.f;
+constexpr float PAD = 12.f;
+
+constexpr float SLIDER_CARD_Y = 48.f;
+constexpr float SLIDER_CARD_H = 92.f;
+constexpr float SLIDER_X0 = PAD + 18.f;
+constexpr float SLIDER_X1 = W - PAD - 64.f;
+constexpr float SLIDER_Y = SLIDER_CARD_Y + 64.f;
+
+constexpr float TOGGLE_CARD_Y = SLIDER_CARD_Y + SLIDER_CARD_H + 8.f;
+constexpr float ROW_H = 38.f;
+constexpr int TOGGLE_COUNT = 5;
+
+enum class Item { None, Close, Slider, Toggle0 };
 
 constexpr UINT WM_PB_SHOW = WM_APP + 1;
 constexpr UINT WM_PB_HIDE = WM_APP + 2;
@@ -48,175 +70,338 @@ constexpr UINT WM_PB_HIDE = WM_APP + 2;
 // WDA_EXCLUDEFROMCAPTURE, spelled out for older SDK headers.
 constexpr DWORD EXCLUDE_FROM_CAPTURE = 0x00000011;
 
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
 struct Values {
-    bool enabled = true;
-    bool releases = true;
-    bool feedback = true;
-    bool stats = false;
-    std::array<double, MODE_COUNT> ms {};
+    int ticks = 2;
+    bool toggles[TOGGLE_COUNT] { true, true, false, true, false };
+};
+
+constexpr char const* TOGGLE_KEYS[TOGGLE_COUNT] {
+    "enabled", "buffer-releases", "buffer-ship", "show-feedback", "show-stats"
+};
+constexpr wchar_t const* TOGGLE_NAMES[TOGGLE_COUNT] {
+    L"Enabled", L"Releases (wave, ship, robot)", L"Ship", L"Timing popup", L"Counter"
 };
 
 std::atomic<HWND> g_window = nullptr;
 std::atomic<HWND> g_game = nullptr;
 std::atomic<bool> g_started = false;
-HFONT g_font = nullptr;
+
+// Only touched on the window thread.
+Values g_values;
+int g_hover = -1; // index into hit targets, see hitTest()
+bool g_dragging = false;
+float g_scale = 1.f;
 
 // Settings are only read and written on the main thread.
 Values readSettings() {
     auto mod = Mod::get();
     Values v;
-    v.enabled = mod->getSettingValue<bool>("enabled");
-    v.releases = mod->getSettingValue<bool>("buffer-releases");
-    v.feedback = mod->getSettingValue<bool>("show-feedback");
-    v.stats = mod->getSettingValue<bool>("show-stats");
-    for (int i = 0; i < MODE_COUNT; ++i) v.ms[i] = mod->getSettingValue<double>(MODE_KEYS[i]);
+    v.ticks = static_cast<int>(mod->getSettingValue<int64_t>("buffer-ticks"));
+    for (int i = 0; i < TOGGLE_COUNT; ++i) v.toggles[i] = mod->getSettingValue<bool>(TOGGLE_KEYS[i]);
     return v;
 }
 
 void writeSettings(Values const& v) {
     auto mod = Mod::get();
-    mod->setSettingValue<bool>("enabled", v.enabled);
-    mod->setSettingValue<bool>("buffer-releases", v.releases);
-    mod->setSettingValue<bool>("show-feedback", v.feedback);
-    mod->setSettingValue<bool>("show-stats", v.stats);
-    for (int i = 0; i < MODE_COUNT; ++i) mod->setSettingValue<double>(MODE_KEYS[i], v.ms[i]);
+    mod->setSettingValue<int64_t>("buffer-ticks", v.ticks);
+    for (int i = 0; i < TOGGLE_COUNT; ++i) mod->setSettingValue<bool>(TOGGLE_KEYS[i], v.toggles[i]);
     if (auto overlay = BufferOverlay::get(PlayLayer::get())) overlay->refresh();
 }
 
-void setCheck(HWND wnd, int id, bool on) {
-    SendDlgItemMessageW(wnd, id, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
+void save() {
+    Values copy = g_values;
+    queueInMainThread([copy] { writeSettings(copy); });
 }
 
-bool getCheck(HWND wnd, int id) {
-    return SendDlgItemMessageW(wnd, id, BM_GETCHECK, 0, 0) == BST_CHECKED;
+// ---------------------------------------------------------------------------
+// Geometry
+// ---------------------------------------------------------------------------
+
+gp::RectF closeRect() { return { W - 40.f, 8.f, 28.f, 24.f }; }
+gp::RectF sliderHitRect() { return { SLIDER_X0 - 10.f, SLIDER_Y - 14.f, SLIDER_X1 - SLIDER_X0 + 20.f, 28.f }; }
+gp::RectF toggleRowRect(int i) { return { PAD, TOGGLE_CARD_Y + 4.f + i * ROW_H, W - PAD * 2, ROW_H }; }
+
+float thumbX(int ticks) {
+    return SLIDER_X0 + (SLIDER_X1 - SLIDER_X0) * (static_cast<float>(ticks) / MAX_TICKS);
 }
 
-void setNumber(HWND wnd, int id, double value) {
-    wchar_t buf[32];
-    std::swprintf(buf, 32, L"%g", value);
-    SetDlgItemTextW(wnd, id, buf);
+int ticksAt(float x) {
+    float t = (x - SLIDER_X0) / (SLIDER_X1 - SLIDER_X0);
+    return std::clamp(static_cast<int>(std::lround(t * MAX_TICKS)), 0, MAX_TICKS);
 }
 
-double getNumber(HWND wnd, int id) {
-    wchar_t buf[32] {};
-    GetDlgItemTextW(wnd, id, buf, 32);
-    double value = std::wcstod(buf, nullptr);
-    if (!(value >= 0.0)) value = 0.0; // also catches NaN
-    return std::min(value, 100.0);
+// Hit targets: 0 = close, 1 = slider, 2.. = toggles.
+int hitTest(float x, float y) {
+    if (closeRect().Contains(x, y)) return 0;
+    if (sliderHitRect().Contains(x, y)) return 1;
+    for (int i = 0; i < TOGGLE_COUNT; ++i) {
+        if (toggleRowRect(i).Contains(x, y)) return 2 + i;
+    }
+    return -1;
 }
 
-void fill(HWND wnd, Values const& v) {
-    setCheck(wnd, ID_ENABLED, v.enabled);
-    setCheck(wnd, ID_RELEASES, v.releases);
-    setCheck(wnd, ID_FEEDBACK, v.feedback);
-    setCheck(wnd, ID_STATS, v.stats);
-    for (int i = 0; i < MODE_COUNT; ++i) setNumber(wnd, ID_MS_BASE + i, v.ms[i]);
+// ---------------------------------------------------------------------------
+// Drawing
+// ---------------------------------------------------------------------------
+
+void roundRect(gp::GraphicsPath& path, gp::RectF r, float radius) {
+    float d = std::min(radius * 2.f, std::min(r.Width, r.Height));
+    path.AddArc(r.X, r.Y, d, d, 180.f, 90.f);
+    path.AddArc(r.X + r.Width - d, r.Y, d, d, 270.f, 90.f);
+    path.AddArc(r.X + r.Width - d, r.Y + r.Height - d, d, d, 0.f, 90.f);
+    path.AddArc(r.X, r.Y + r.Height - d, d, d, 90.f, 90.f);
+    path.CloseFigure();
 }
 
-Values collect(HWND wnd) {
-    Values v;
-    v.enabled = getCheck(wnd, ID_ENABLED);
-    v.releases = getCheck(wnd, ID_RELEASES);
-    v.feedback = getCheck(wnd, ID_FEEDBACK);
-    v.stats = getCheck(wnd, ID_STATS);
-    for (int i = 0; i < MODE_COUNT; ++i) v.ms[i] = getNumber(wnd, ID_MS_BASE + i);
-    return v;
+void fillRound(gp::Graphics& g, gp::Color color, gp::RectF r, float radius) {
+    gp::GraphicsPath path;
+    roundRect(path, r, radius);
+    gp::SolidBrush brush(color);
+    g.FillPath(&brush, &path);
 }
+
+void strokeRound(gp::Graphics& g, gp::Color color, gp::RectF r, float radius, float width = 1.f) {
+    gp::GraphicsPath path;
+    roundRect(path, r, radius);
+    gp::Pen pen(color, width);
+    g.DrawPath(&pen, &path);
+}
+
+void text(gp::Graphics& g, std::wstring const& s, float size, gp::Color color, gp::RectF r,
+          gp::StringAlignment align = gp::StringAlignmentNear, bool bold = false) {
+    gp::FontFamily family(L"Segoe UI");
+    gp::Font font(&family, size, bold ? gp::FontStyleBold : gp::FontStyleRegular, gp::UnitPixel);
+    gp::SolidBrush brush(color);
+    gp::StringFormat fmt;
+    fmt.SetAlignment(align);
+    fmt.SetLineAlignment(gp::StringAlignmentCenter);
+    fmt.SetFormatFlags(gp::StringFormatFlagsNoWrap);
+    g.DrawString(s.c_str(), -1, &font, r, &fmt, &brush);
+}
+
+void drawToggle(gp::Graphics& g, float x, float y, bool on) {
+    gp::RectF track(x, y, 38.f, 20.f);
+    fillRound(g, on ? COL_ACCENT : COL_TRACK, track, 10.f);
+    float knobX = on ? x + 38.f - 17.f : x + 3.f;
+    gp::SolidBrush knob(on ? gp::Color(255, 0xff, 0xff, 0xff) : COL_MUTED);
+    g.FillEllipse(&knob, knobX, y + 3.f, 14.f, 14.f);
+}
+
+void paint(HWND wnd, HDC target) {
+    RECT client;
+    GetClientRect(wnd, &client);
+    int pw = client.right - client.left;
+    int ph = client.bottom - client.top;
+
+    // Draw into a back buffer so nothing flickers.
+    gp::Bitmap buffer(pw, ph, PixelFormat32bppARGB);
+    gp::Graphics g(&buffer);
+    g.SetSmoothingMode(gp::SmoothingModeAntiAlias);
+    g.SetTextRenderingHint(gp::TextRenderingHintClearTypeGridFit);
+    g.ScaleTransform(g_scale, g_scale);
+
+    g.Clear(COL_BG);
+    gp::Pen outline(COL_BORDER, 1.f);
+    g.DrawRectangle(&outline, 0.f, 0.f, W - 1.f, H - 1.f);
+
+    // Title bar
+    text(g, L"Input Buffer", 15.f, COL_TEXT, { PAD + 4.f, 0.f, 200.f, TITLE_H }, gp::StringAlignmentNear, true);
+    auto close = closeRect();
+    if (g_hover == 0) fillRound(g, COL_CLOSE_HOVER, close, 4.f);
+    {
+        gp::Pen pen(g_hover == 0 ? COL_TEXT : COL_MUTED, 1.5f);
+        float cx = close.X + close.Width / 2.f;
+        float cy = close.Y + close.Height / 2.f;
+        g.DrawLine(&pen, cx - 5.f, cy - 5.f, cx + 5.f, cy + 5.f);
+        g.DrawLine(&pen, cx + 5.f, cy - 5.f, cx - 5.f, cy + 5.f);
+    }
+
+    // Slider card
+    gp::RectF sliderCard(PAD, SLIDER_CARD_Y, W - PAD * 2, SLIDER_CARD_H);
+    fillRound(g, g_hover == 1 || g_dragging ? COL_CARD_HOVER : COL_CARD, sliderCard, 6.f);
+    strokeRound(g, COL_BORDER, sliderCard, 6.f);
+
+    text(g, L"Buffer", 14.f, COL_TEXT, { SLIDER_X0, SLIDER_CARD_Y + 10.f, 120.f, 24.f }, gp::StringAlignmentNear, true);
+    wchar_t ms[48];
+    std::swprintf(ms, 48, L"%.1f ms", g_values.ticks * 1000.0 / 240.0);
+    text(g, ms, 12.f, COL_MUTED, { SLIDER_X0, SLIDER_CARD_Y + 10.f, W - PAD - 18.f - SLIDER_X0, 24.f }, gp::StringAlignmentFar);
+
+    float tx = thumbX(g_values.ticks);
+    fillRound(g, COL_TRACK, { SLIDER_X0, SLIDER_Y - 2.f, SLIDER_X1 - SLIDER_X0, 4.f }, 2.f);
+    if (tx > SLIDER_X0) fillRound(g, COL_TEXT, { SLIDER_X0, SLIDER_Y - 2.f, tx - SLIDER_X0, 4.f }, 2.f);
+    fillRound(g, gp::Color(255, 0xff, 0xff, 0xff), { tx - 4.f, SLIDER_Y - 11.f, 8.f, 22.f }, 4.f);
+
+    text(g, std::to_wstring(g_values.ticks), 22.f, COL_TEXT, { SLIDER_X1 + 8.f, SLIDER_Y - 16.f, 46.f, 32.f }, gp::StringAlignmentFar);
+
+    // Toggle card
+    gp::RectF toggleCard(PAD, TOGGLE_CARD_Y, W - PAD * 2, ROW_H * TOGGLE_COUNT + 8.f);
+    fillRound(g, COL_CARD, toggleCard, 6.f);
+    strokeRound(g, COL_BORDER, toggleCard, 6.f);
+
+    for (int i = 0; i < TOGGLE_COUNT; ++i) {
+        auto row = toggleRowRect(i);
+        if (g_hover == 2 + i) fillRound(g, COL_CARD_HOVER, { row.X + 4.f, row.Y + 2.f, row.Width - 8.f, row.Height - 4.f }, 4.f);
+        if (i > 0) {
+            gp::Pen sep(gp::Color(255, 0x1b, 0x1b, 0x1b), 1.f);
+            g.DrawLine(&sep, row.X + 14.f, row.Y, row.X + row.Width - 14.f, row.Y);
+        }
+        text(g, TOGGLE_NAMES[i], 13.f, COL_TEXT, { row.X + 18.f, row.Y, 220.f, row.Height });
+        drawToggle(g, row.X + row.Width - 18.f - 38.f, row.Y + (row.Height - 20.f) / 2.f, g_values.toggles[i]);
+    }
+
+    // Footer
+    text(g, L"F7 / Esc to close  ·  scroll or arrows to adjust", 11.f, COL_MUTED,
+         { PAD, H - 30.f, W - PAD * 2, 22.f }, gp::StringAlignmentCenter);
+
+    gp::Graphics screen(target);
+    screen.DrawImage(&buffer, 0, 0, pw, ph);
+}
+
+// ---------------------------------------------------------------------------
+// Window
+// ---------------------------------------------------------------------------
 
 void hide(HWND wnd) {
+    g_dragging = false;
+    ReleaseCapture();
     ShowWindow(wnd, SW_HIDE);
     if (HWND game = g_game.load()) SetForegroundWindow(game);
 }
 
-HWND add(HWND parent, wchar_t const* cls, wchar_t const* text, DWORD style, int x, int y, int w, int h, int id) {
-    HWND ctl = CreateWindowExW(
-        0, cls, text, WS_CHILD | WS_VISIBLE | style, x, y, w, h,
-        parent, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr), nullptr
-    );
-    SendMessageW(ctl, WM_SETFONT, reinterpret_cast<WPARAM>(g_font), TRUE);
-    return ctl;
+void setTicks(HWND wnd, int ticks, bool commit) {
+    ticks = std::clamp(ticks, 0, MAX_TICKS);
+    if (ticks != g_values.ticks) {
+        g_values.ticks = ticks;
+        InvalidateRect(wnd, nullptr, FALSE);
+    }
+    if (commit) save();
 }
 
-void build(HWND wnd) {
-    int y = 10;
-    add(wnd, L"BUTTON", L"Enabled", BS_AUTOCHECKBOX | WS_TABSTOP, 12, y, 130, 22, ID_ENABLED);
-    add(wnd, L"BUTTON", L"Buffer releases", BS_AUTOCHECKBOX | WS_TABSTOP, 150, y, 140, 22, ID_RELEASES);
-    y += 24;
-    add(wnd, L"BUTTON", L"Timing feedback", BS_AUTOCHECKBOX | WS_TABSTOP, 12, y, 130, 22, ID_FEEDBACK);
-    add(wnd, L"BUTTON", L"Show counter", BS_AUTOCHECKBOX | WS_TABSTOP, 150, y, 140, 22, ID_STATS);
-    y += 32;
-
-    add(wnd, L"STATIC", L"Max delay per gamemode (ms, 0 = off)", 0, 12, y, 280, 18, -1);
-    y += 22;
-    for (int i = 0; i < MODE_COUNT; ++i) {
-        int col = i % 2;
-        int row = i / 2;
-        int x = 12 + col * 138;
-        int rowY = y + row * 28;
-        add(wnd, L"STATIC", MODE_NAMES[i], SS_CENTERIMAGE, x, rowY, 52, 22, -1);
-        add(wnd, L"EDIT", L"", ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, x + 54, rowY, 70, 22, ID_MS_BASE + i);
-    }
-    y += 4 * 28 + 6;
-
-    add(wnd, L"STATIC", L"Set all (except ship):", 0, 12, y, 280, 18, -1);
-    y += 20;
-    for (int i = 0; i < 4; ++i) {
-        add(wnd, L"BUTTON", PRESET_LABELS[i], BS_PUSHBUTTON | WS_TABSTOP, 12 + i * 69, y, 64, 24, ID_PRESET_BASE + i);
-    }
-    y += 34;
-
-    add(wnd, L"BUTTON", L"Apply", BS_DEFPUSHBUTTON | WS_TABSTOP, 12, y, 133, 28, ID_APPLY);
-    add(wnd, L"BUTTON", L"Close", BS_PUSHBUTTON | WS_TABSTOP, 151, y, 133, 28, ID_CLOSE);
-    y += 34;
-
-    add(wnd, L"STATIC", L"Hidden from OBS / Discord capture. Esc closes.", 0, 12, y, 280, 18, -1);
-}
-
-void showNear(HWND wnd) {
-    RECT game {};
-    HWND gameWnd = g_game.load();
-    if (gameWnd && GetWindowRect(gameWnd, &game)) {
-        SetWindowPos(wnd, HWND_TOPMOST, game.left + 40, game.top + 60, 0, 0, SWP_NOSIZE);
-    }
-    ShowWindow(wnd, SW_SHOW);
-    SetForegroundWindow(wnd);
-    SetFocus(GetDlgItem(wnd, ID_MS_BASE));
-}
+float logicalX(LPARAM lParam) { return GET_X_LPARAM(lParam) / g_scale; }
+float logicalY(LPARAM lParam) { return GET_Y_LPARAM(lParam) / g_scale; }
 
 LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_PB_SHOW: {
             auto values = reinterpret_cast<Values*>(lParam);
-            fill(wnd, *values);
+            g_values = *values;
             delete values;
-            showNear(wnd);
+            g_hover = -1;
+
+            RECT game {};
+            HWND gameWnd = g_game.load();
+            if (gameWnd && GetWindowRect(gameWnd, &game)) {
+                SetWindowPos(wnd, HWND_TOPMOST, game.left + 40, game.top + 60, 0, 0, SWP_NOSIZE);
+            }
+            ShowWindow(wnd, SW_SHOW);
+            SetForegroundWindow(wnd);
+            InvalidateRect(wnd, nullptr, FALSE);
             return 0;
         }
         case WM_PB_HIDE:
             hide(wnd);
             return 0;
 
-        case WM_COMMAND: {
-            int id = LOWORD(wParam);
-            if (id == ID_APPLY) {
-                auto values = collect(wnd);
-                fill(wnd, values); // show the clamped numbers
-                queueInMainThread([values] { writeSettings(values); });
+        case WM_NCHITTEST: {
+            // Drag the window by its title bar.
+            POINT pt { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+            ScreenToClient(wnd, &pt);
+            float x = pt.x / g_scale;
+            float y = pt.y / g_scale;
+            if (y < TITLE_H && !closeRect().Contains(x, y)) return HTCAPTION;
+            return HTCLIENT;
+        }
+
+        case WM_ERASEBKGND:
+            return 1;
+
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC dc = BeginPaint(wnd, &ps);
+            paint(wnd, dc);
+            EndPaint(wnd, &ps);
+            return 0;
+        }
+
+        case WM_MOUSEMOVE: {
+            float x = logicalX(lParam);
+            float y = logicalY(lParam);
+            if (g_dragging) {
+                setTicks(wnd, ticksAt(x), false);
                 return 0;
             }
-            if (id == ID_CLOSE) {
+            int hover = hitTest(x, y);
+            if (hover != g_hover) {
+                g_hover = hover;
+                InvalidateRect(wnd, nullptr, FALSE);
+            }
+            TRACKMOUSEEVENT tme { sizeof(tme), TME_LEAVE, wnd, 0 };
+            TrackMouseEvent(&tme);
+            return 0;
+        }
+
+        case WM_MOUSELEAVE:
+            if (g_hover != -1) {
+                g_hover = -1;
+                InvalidateRect(wnd, nullptr, FALSE);
+            }
+            return 0;
+
+        case WM_LBUTTONDOWN: {
+            float x = logicalX(lParam);
+            float y = logicalY(lParam);
+            int hit = hitTest(x, y);
+            if (hit == 0) {
                 hide(wnd);
-                return 0;
             }
-            if (id >= ID_PRESET_BASE && id < ID_PRESET_BASE + 4) {
-                double ms = PRESETS[id - ID_PRESET_BASE];
-                for (int i = 0; i < MODE_COUNT; ++i) {
-                    if (i != SHIP_INDEX) setNumber(wnd, ID_MS_BASE + i, ms);
-                }
-                return 0;
+            else if (hit == 1) {
+                g_dragging = true;
+                SetCapture(wnd);
+                setTicks(wnd, ticksAt(x), false);
+            }
+            else if (hit >= 2) {
+                g_values.toggles[hit - 2] = !g_values.toggles[hit - 2];
+                InvalidateRect(wnd, nullptr, FALSE);
+                save();
+            }
+            return 0;
+        }
+
+        case WM_LBUTTONUP:
+            if (g_dragging) {
+                g_dragging = false;
+                ReleaseCapture();
+                save();
+                InvalidateRect(wnd, nullptr, FALSE);
+            }
+            return 0;
+
+        case WM_MOUSEWHEEL: {
+            int steps = GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
+            setTicks(wnd, g_values.ticks + steps, true);
+            return 0;
+        }
+
+        case WM_KEYDOWN:
+            switch (wParam) {
+                case VK_ESCAPE:
+                case VK_F7:
+                    hide(wnd);
+                    return 0;
+                case VK_LEFT:
+                case VK_DOWN:
+                    setTicks(wnd, g_values.ticks - 1, true);
+                    return 0;
+                case VK_RIGHT:
+                case VK_UP:
+                    setTicks(wnd, g_values.ticks + 1, true);
+                    return 0;
             }
             break;
-        }
 
         case WM_CLOSE:
             hide(wnd); // keep the window around, just hide it
@@ -225,40 +410,53 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return DefWindowProcW(wnd, msg, wParam, lParam);
 }
 
+void roundCorners(HWND wnd) {
+    // Windows 11 rounded corners, loaded at runtime so nothing extra is linked.
+    if (auto dwm = LoadLibraryW(L"dwmapi.dll")) {
+        using Fn = HRESULT(WINAPI*)(HWND, DWORD, LPCVOID, DWORD);
+        if (auto set = reinterpret_cast<Fn>(GetProcAddress(dwm, "DwmSetWindowAttribute"))) {
+            int round = 2;  // DWMWCP_ROUND
+            set(wnd, 33, &round, sizeof(round)); // DWMWA_WINDOW_CORNER_PREFERENCE
+            BOOL dark = TRUE;
+            set(wnd, 20, &dark, sizeof(dark));   // DWMWA_USE_IMMERSIVE_DARK_MODE
+        }
+    }
+}
+
 void windowThread() {
+    gp::GdiplusStartupInput input;
+    ULONG_PTR token = 0;
+    gp::GdiplusStartup(&token, &input, nullptr);
+
     auto instance = GetModuleHandleW(nullptr);
 
-    NONCLIENTMETRICSW metrics { sizeof(metrics) };
-    SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0);
-    g_font = CreateFontIndirectW(&metrics.lfMessageFont);
+    HDC screen = GetDC(nullptr);
+    g_scale = GetDeviceCaps(screen, LOGPIXELSX) / 96.f;
+    ReleaseDC(nullptr, screen);
+    if (!(g_scale >= 1.f && g_scale <= 4.f)) g_scale = 1.f;
 
     WNDCLASSW cls {};
+    cls.style = CS_DROPSHADOW;
     cls.lpfnWndProc = windowProc;
     cls.hInstance = instance;
     cls.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512)); // IDC_ARROW
-    cls.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1);
-    cls.lpszClassName = L"PredictiveBufferMenu";
+    cls.lpszClassName = L"InputBufferQuickSettings";
     RegisterClassW(&cls);
 
-    // Size the outer window so the client area fits the controls.
-    RECT rect { 0, 0, 296, 380 };
-    DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
-    DWORD exStyle = WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
-    AdjustWindowRectEx(&rect, style, FALSE, exStyle);
+    int pw = static_cast<int>(std::lround(W * g_scale));
+    int ph = static_cast<int>(std::lround(H * g_scale));
 
     HWND wnd = CreateWindowExW(
-        exStyle, cls.lpszClassName, L"Predictive Buffer", style,
-        CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top,
-        nullptr, nullptr, instance, nullptr
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW, cls.lpszClassName, L"Input Buffer", WS_POPUP,
+        CW_USEDEFAULT, CW_USEDEFAULT, pw, ph, nullptr, nullptr, instance, nullptr
     );
     if (!wnd) {
         g_started = false;
         return;
     }
-    build(wnd);
+    roundCorners(wnd);
 
-    // Hide from capture. Falls back to showing as a black box on Windows
-    // versions older than 10 (2004).
+    // Hide from capture. Falls back to a black box on Windows older than 10 (2004).
     if (!SetWindowDisplayAffinity(wnd, EXCLUDE_FROM_CAPTURE)) {
         SetWindowDisplayAffinity(wnd, WDA_MONITOR);
     }
@@ -267,10 +465,8 @@ void windowThread() {
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
-        if (!IsDialogMessageW(wnd, &msg)) {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
     }
 }
 

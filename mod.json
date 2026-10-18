@@ -6,112 +6,49 @@
 		"mac": "2.2081",
 		"ios": "2.2081"
 	},
-	"id": "ai.predictivebuffer",
-	"name": "Predictive Input Buffer",
-	"version": "v2.1.0",
+	"id": "lilwc.input-buffer",
+	"name": "Input Buffer",
+	"version": "v2.2.0",
 	"developer": "lilWC",
-	"description": "Holds early clicks for a few ms when they would kill you. Practice tool.",
-	"tags": ["gameplay", "cheat"],
+	"description": "Input timing tweaks.",
+	"tags": ["gameplay"],
 	"settings": {
-		"general-title": {
-			"type": "title",
-			"name": "General"
-		},
 		"enabled": {
 			"type": "bool",
 			"name": "Enabled",
-			"description": "Turns the buffer on or off. You can also use the toggle key while playing.",
 			"default": true
+		},
+		"buffer-ticks": {
+			"type": "int",
+			"name": "Ticks",
+			"description": "1 tick = 4.17 ms at 240 TPS.",
+			"default": 2,
+			"min": 0,
+			"max": 24,
+			"control": { "arrow-step": 1, "slider-step": 1 }
+		},
+		"buffer-releases": {
+			"type": "bool",
+			"name": "Releases",
+			"description": "Wave, ship and robot.",
+			"default": true
+		},
+		"buffer-ship": {
+			"type": "bool",
+			"name": "Ship",
+			"default": false
 		},
 		"toggle-key": {
 			"type": "keybind",
 			"name": "Toggle Key",
-			"description": "Turns the buffer on or off while you're in a level.",
 			"default": "F6",
 			"category": "gameplay"
 		},
 		"menu-key": {
 			"type": "keybind",
-			"name": "Quick Settings Key",
-			"description": "Opens a small settings window. On Windows it's a separate window that's hidden from OBS / Discord capture. On other platforms it opens this settings page.",
+			"name": "Menu Key",
 			"default": "F7",
 			"category": "universal"
-		},
-		"buffer-releases": {
-			"type": "bool",
-			"name": "Buffer Releases",
-			"description": "Also hold back early <cy>releases</c> for wave, ship and robot, where letting go too early can kill you.",
-			"default": true
-		},
-		"modes-title": {
-			"type": "title",
-			"name": "Max Delay Per Gamemode (ms)",
-			"description": "How late an early click is allowed to be moved, in milliseconds. 0 turns it off for that mode. At 240 TPS one physics step is about 4.17 ms, so 8.5 ms = 2 steps (the old Stage 1)."
-		},
-		"cube-ms": {
-			"type": "float",
-			"name": "Cube",
-			"default": 8.5,
-			"min": 0,
-			"max": 100,
-			"control": { "arrow-step": 0.5, "slider-step": 0.5 }
-		},
-		"ship-ms": {
-			"type": "float",
-			"name": "Ship",
-			"description": "Off by default (the original version never buffered ship).",
-			"default": 0,
-			"min": 0,
-			"max": 100,
-			"control": { "arrow-step": 0.5, "slider-step": 0.5 }
-		},
-		"ball-ms": {
-			"type": "float",
-			"name": "Ball",
-			"default": 8.5,
-			"min": 0,
-			"max": 100,
-			"control": { "arrow-step": 0.5, "slider-step": 0.5 }
-		},
-		"ufo-ms": {
-			"type": "float",
-			"name": "UFO",
-			"default": 8.5,
-			"min": 0,
-			"max": 100,
-			"control": { "arrow-step": 0.5, "slider-step": 0.5 }
-		},
-		"wave-ms": {
-			"type": "float",
-			"name": "Wave",
-			"default": 8.5,
-			"min": 0,
-			"max": 100,
-			"control": { "arrow-step": 0.5, "slider-step": 0.5 }
-		},
-		"robot-ms": {
-			"type": "float",
-			"name": "Robot",
-			"default": 8.5,
-			"min": 0,
-			"max": 100,
-			"control": { "arrow-step": 0.5, "slider-step": 0.5 }
-		},
-		"spider-ms": {
-			"type": "float",
-			"name": "Spider",
-			"default": 8.5,
-			"min": 0,
-			"max": 100,
-			"control": { "arrow-step": 0.5, "slider-step": 0.5 }
-		},
-		"swing-ms": {
-			"type": "float",
-			"name": "Swing",
-			"default": 8.5,
-			"min": 0,
-			"max": 100,
-			"control": { "arrow-step": 0.5, "slider-step": 0.5 }
 		},
 		"display-title": {
 			"type": "title",
@@ -119,14 +56,12 @@
 		},
 		"show-feedback": {
 			"type": "bool",
-			"name": "Show Timing Feedback",
-			"description": "Pops up how early your click was every time it gets buffered.",
+			"name": "Timing Popup",
 			"default": true
 		},
 		"show-stats": {
 			"type": "bool",
-			"name": "Show Counter",
-			"description": "Keeps a small line on screen with how many inputs got buffered this attempt and this session.",
+			"name": "Counter",
 			"default": false
 		},
 		"label-position": {
@@ -157,8 +92,7 @@
 		},
 		"look-ahead-ms": {
 			"type": "float",
-			"name": "Look-Ahead",
-			"description": "How far ahead (ms) the mod simulates to decide if a click kills you. Longer catches more, but past the next obstacle you'd need another input anyway, so too long makes it give up more often.",
+			"name": "Look-Ahead (ms)",
 			"default": 200,
 			"min": 50,
 			"max": 400,
@@ -166,8 +100,7 @@
 		},
 		"wave-look-ahead-ms": {
 			"type": "float",
-			"name": "Wave Look-Ahead",
-			"description": "Same as Look-Ahead but for wave, which hits walls a lot sooner.",
+			"name": "Wave Look-Ahead (ms)",
 			"default": 160,
 			"min": 50,
 			"max": 400,
@@ -175,8 +108,7 @@
 		},
 		"min-gain-ms": {
 			"type": "float",
-			"name": "Min Survival Gain",
-			"description": "A delayed click only counts if it either survives the whole look-ahead or lives at least this many ms longer than the original click.",
+			"name": "Min Gain (ms)",
 			"default": 45,
 			"min": 5,
 			"max": 200,
@@ -185,7 +117,6 @@
 		"debug-log": {
 			"type": "bool",
 			"name": "Debug Logging",
-			"description": "Writes every decision to the Geode log (open it with the Geode console).",
 			"default": false
 		}
 	}
