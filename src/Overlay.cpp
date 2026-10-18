@@ -68,9 +68,11 @@ void BufferOverlay::refresh() {
         auto const& s = g.stats;
         double avg = s.sessionCount > 0 ? s.sessionEarlyMs / s.sessionCount : 0.0;
         bool on = Mod::get()->getSettingValue<bool>("enabled");
+        auto assist = Mod::get()->getSettingValue<int64_t>("ship-assist");
         m_stats->setString(fmt::format(
-            "Buffer {} | attempt {} | session {} (avg {:.1f}ms)",
-            on ? "ON" : "OFF", s.attemptCount, s.sessionCount, avg
+            "Buffer {} | attempt {} | session {} (avg {:.1f}ms){}",
+            on ? "ON" : "OFF", s.attemptCount, s.sessionCount, avg,
+            on && assist > 0 ? fmt::format(" | ship assist {}%", assist) : std::string()
         ).c_str());
         auto opacity = static_cast<GLubyte>(Mod::get()->getSettingValue<int64_t>("label-opacity"));
         m_stats->setOpacity(opacity);

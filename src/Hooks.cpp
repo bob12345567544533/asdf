@@ -150,11 +150,21 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
 
 class $modify(PBPlayerObject, PlayerObject) {
     void update(float dt) {
-        if (!pb::g_simulating) {
-            auto pl = PlayLayer::get();
-            if (pl && this == pl->m_player1) pb::onStep(pl, dt);
-        }
+        auto pl = PlayLayer::get();
+        if (!pb::g_simulating && pl && this == pl->m_player1) pb::onStep(pl, dt);
+
+        // Ship assist: keep only part of this step's change in vertical speed,
+        // so every tap moves the ship a little less. Ghosts get it too, so the
+        // buffer's predictions match.
+        bool assist = pb::g_shipAssist > 0.f && pl && m_gameLayer == pl
+            && m_isShip && !m_isSwing && !m_isDead;
+        double before = m_yVelocity;
+
         PlayerObject::update(dt);
+
+        if (assist) {
+            m_yVelocity = before + (m_yVelocity - before) * (1.0 - pb::g_shipAssist);
+        }
     }
 
     void ringJump(RingObject* ring, bool skipCheck) {
@@ -229,7 +239,10 @@ $on_mod(Loaded) {
         if (down && !repeat) pb::menu::toggle();
     });
 
+    pb::refreshCachedSettings();
+
     listenForAllSettingChanges([](std::string_view, std::shared_ptr<SettingV3>) {
+        pb::refreshCachedSettings();
         if (auto overlay = pb::BufferOverlay::get(PlayLayer::get())) overlay->refresh();
         pb::menu::sync();
     });

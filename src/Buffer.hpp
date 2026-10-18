@@ -19,6 +19,11 @@ inline bool g_simulating = false; // a ghost simulation is running right now
 inline bool g_simDied = false;    // a ghost died during the current simulation
 inline bool g_bypass = false;     // we are replaying a held input, don't intercept it
 
+// Ship assist strength (0 = off, 0.5 = half the vertical acceleration).
+// Cached here because it's read every physics step.
+inline float g_shipAssist = 0.f;
+void refreshCachedSettings();
+
 // An input we are holding back, plus the physics step it should fire on.
 struct QueuedInput {
     bool down = false;

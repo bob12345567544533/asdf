@@ -55,6 +55,12 @@ static T setting(char const* key) {
     return Mod::get()->getSettingValue<T>(key);
 }
 
+void refreshCachedSettings() {
+    bool enabled = setting<bool>("enabled");
+    double assist = static_cast<double>(setting<int64_t>("ship-assist")) / 100.0;
+    g_shipAssist = enabled ? static_cast<float>(std::clamp(assist, 0.0, 0.5)) : 0.f;
+}
+
 bool isGhost(PlayerObject* player) {
     return player && (player == g.ghosts[0] || player == g.ghosts[1]);
 }

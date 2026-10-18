@@ -8,7 +8,7 @@
 	},
 	"id": "lilwc.input-buffer",
 	"name": "Input Buffer",
-	"version": "v2.3.0",
+	"version": "v2.4.0",
 	"developer": "lilWC",
 	"description": "Input timing tweaks.",
 	"tags": ["gameplay"],
@@ -37,6 +37,15 @@
 			"type": "bool",
 			"name": "Ship",
 			"default": false
+		},
+		"ship-assist": {
+			"type": "int",
+			"name": "Ship Assist (%)",
+			"description": "Makes the ship a bit floatier. 0 = off.",
+			"default": 15,
+			"min": 0,
+			"max": 50,
+			"control": { "arrow-step": 1, "slider-step": 1 }
 		},
 		"toggle-key": {
 			"type": "keybind",

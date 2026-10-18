@@ -56,14 +56,20 @@ constexpr float TITLE_H = 40.f;
 constexpr float PAD = 12.f;
 constexpr float GAP = 8.f;
 
-constexpr float SLIDER_CARD_Y = TITLE_H + GAP;
+// Sliders: 0 = buffer ticks, 1 = ship assist %.
+constexpr int SLIDER_COUNT = 2;
+constexpr int SLIDER_MAX[SLIDER_COUNT] { MAX_TICKS, 50 };
+constexpr char const* SLIDER_KEYS[SLIDER_COUNT] { "buffer-ticks", "ship-assist" };
+constexpr wchar_t const* SLIDER_NAMES[SLIDER_COUNT] { L"Buffer", L"Ship assist" };
+
 constexpr float SLIDER_CARD_H = 92.f;
 constexpr float SLIDER_X0 = PAD + 18.f;
 constexpr float SLIDER_X1 = W - PAD - 64.f;
-constexpr float SLIDER_Y = SLIDER_CARD_Y + 64.f;
+constexpr float sliderCardY(int i) { return TITLE_H + GAP + i * (SLIDER_CARD_H + GAP); }
+constexpr float sliderY(int i) { return sliderCardY(i) + 64.f; }
 
 constexpr float ROW_H = 38.f;
-constexpr float TOGGLE_CARD_Y = SLIDER_CARD_Y + SLIDER_CARD_H + GAP;
+constexpr float TOGGLE_CARD_Y = sliderCardY(SLIDER_COUNT);
 constexpr float TOGGLE_CARD_H = ROW_H * TOGGLE_COUNT + 8.f;
 
 constexpr float LOG_LINE_H = 18.f;
@@ -86,7 +92,7 @@ constexpr DWORD EXCLUDE_FROM_CAPTURE = 0x00000011;
 // ---------------------------------------------------------------------------
 
 struct Values {
-    int ticks = 2;
+    int sliders[SLIDER_COUNT] { 2, 15 };
     bool toggles[TOGGLE_COUNT] { true, true, false, true, false };
     bool hasPos = false;
     int x = 0;
@@ -108,7 +114,8 @@ std::atomic<bool> g_started = false;
 Values g_values;
 std::deque<std::wstring> g_log;
 int g_hover = -1; // see hitTest()
-bool g_dragging = false;
+int g_dragging = -1;    // slider being dragged, -1 if none
+int g_focusSlider = 0;  // slider the arrow keys move
 bool g_placed = false;
 float g_scale = 1.f;
 
@@ -116,7 +123,7 @@ float g_scale = 1.f;
 Values readSettings() {
     auto mod = Mod::get();
     Values v;
-    v.ticks = static_cast<int>(mod->getSettingValue<int64_t>("buffer-ticks"));
+    for (int i = 0; i < SLIDER_COUNT; ++i) v.sliders[i] = static_cast<int>(mod->getSettingValue<int64_t>(SLIDER_KEYS[i]));
     for (int i = 0; i < TOGGLE_COUNT; ++i) v.toggles[i] = mod->getSettingValue<bool>(TOGGLE_KEYS[i]);
     v.hasPos = mod->getSavedValue<bool>("window-has-pos", false);
     v.x = static_cast<int>(mod->getSavedValue<int64_t>("window-x", 0));
@@ -126,7 +133,7 @@ Values readSettings() {
 
 void writeSettings(Values const& v) {
     auto mod = Mod::get();
-    mod->setSettingValue<int64_t>("buffer-ticks", v.ticks);
+    for (int i = 0; i < SLIDER_COUNT; ++i) mod->setSettingValue<int64_t>(SLIDER_KEYS[i], v.sliders[i]);
     for (int i = 0; i < TOGGLE_COUNT; ++i) mod->setSettingValue<bool>(TOGGLE_KEYS[i], v.toggles[i]);
     if (auto overlay = BufferOverlay::get(PlayLayer::get())) overlay->refresh();
 }
@@ -155,28 +162,33 @@ void savePosition(HWND wnd) {
 
 gp::RectF closeRect() { return { W - 40.f, 8.f, 28.f, 24.f }; }
 gp::RectF minimizeRect() { return { W - 72.f, 8.f, 28.f, 24.f }; }
-gp::RectF sliderHitRect() { return { SLIDER_X0 - 10.f, SLIDER_Y - 14.f, SLIDER_X1 - SLIDER_X0 + 20.f, 28.f }; }
+gp::RectF sliderHitRect(int i) { return { PAD, sliderCardY(i), W - PAD * 2, SLIDER_CARD_H }; }
 gp::RectF toggleRowRect(int i) { return { PAD, TOGGLE_CARD_Y + 4.f + i * ROW_H, W - PAD * 2, ROW_H }; }
 
-float thumbX(int ticks) {
-    return SLIDER_X0 + (SLIDER_X1 - SLIDER_X0) * (static_cast<float>(ticks) / MAX_TICKS);
+float thumbX(int slider, int value) {
+    return SLIDER_X0 + (SLIDER_X1 - SLIDER_X0) * (static_cast<float>(value) / SLIDER_MAX[slider]);
 }
 
-int ticksAt(float x) {
+int valueAt(int slider, float x) {
     float t = (x - SLIDER_X0) / (SLIDER_X1 - SLIDER_X0);
-    return std::clamp(static_cast<int>(std::lround(t * MAX_TICKS)), 0, MAX_TICKS);
+    int max = SLIDER_MAX[slider];
+    return std::clamp(static_cast<int>(std::lround(t * max)), 0, max);
 }
 
-// Hit targets: 0 = close, 1 = slider, 2..6 = toggles, 7 = minimize.
+// Hit targets: 0 = close, 2..6 = toggles, 7 = minimize, 10+ = sliders.
 constexpr int HIT_CLOSE = 0;
-constexpr int HIT_SLIDER = 1;
 constexpr int HIT_TOGGLE = 2;
 constexpr int HIT_MINIMIZE = 7;
+constexpr int HIT_SLIDER = 10;
+
+bool isSliderHit(int hit) { return hit >= HIT_SLIDER && hit < HIT_SLIDER + SLIDER_COUNT; }
 
 int hitTest(float x, float y) {
     if (closeRect().Contains(x, y)) return HIT_CLOSE;
     if (minimizeRect().Contains(x, y)) return HIT_MINIMIZE;
-    if (sliderHitRect().Contains(x, y)) return HIT_SLIDER;
+    for (int i = 0; i < SLIDER_COUNT; ++i) {
+        if (sliderHitRect(i).Contains(x, y)) return HIT_SLIDER + i;
+    }
     for (int i = 0; i < TOGGLE_COUNT; ++i) {
         if (toggleRowRect(i).Contains(x, y)) return HIT_TOGGLE + i;
     }
@@ -275,18 +287,27 @@ void paint(HWND wnd, HDC target) {
         g.DrawLine(&pen, cx + 5.f, cy - 5.f, cx - 5.f, cy + 5.f);
     }
 
-    // Slider card
-    card(g, { PAD, SLIDER_CARD_Y, W - PAD * 2, SLIDER_CARD_H }, g_hover == HIT_SLIDER || g_dragging);
-    text(g, L"Buffer", 14.f, COL_TEXT, { SLIDER_X0, SLIDER_CARD_Y + 10.f, 120.f, 24.f }, gp::StringAlignmentNear, true);
-    wchar_t ms[48];
-    std::swprintf(ms, 48, L"%.1f ms", g_values.ticks * 1000.0 / 240.0);
-    text(g, ms, 12.f, COL_MUTED, { SLIDER_X0, SLIDER_CARD_Y + 10.f, W - PAD - 18.f - SLIDER_X0, 24.f }, gp::StringAlignmentFar);
+    // Slider cards
+    for (int i = 0; i < SLIDER_COUNT; ++i) {
+        float cardY = sliderCardY(i);
+        float y = sliderY(i);
+        int value = g_values.sliders[i];
+        card(g, { PAD, cardY, W - PAD * 2, SLIDER_CARD_H }, g_hover == HIT_SLIDER + i || g_dragging == i);
+        text(g, SLIDER_NAMES[i], 14.f, COL_TEXT, { SLIDER_X0, cardY + 10.f, 160.f, 24.f }, gp::StringAlignmentNear, true);
 
-    float tx = thumbX(g_values.ticks);
-    fillRound(g, COL_TRACK, { SLIDER_X0, SLIDER_Y - 2.f, SLIDER_X1 - SLIDER_X0, 4.f }, 2.f);
-    if (tx > SLIDER_X0) fillRound(g, COL_TEXT, { SLIDER_X0, SLIDER_Y - 2.f, tx - SLIDER_X0, 4.f }, 2.f);
-    fillRound(g, gp::Color(255, 0xff, 0xff, 0xff), { tx - 4.f, SLIDER_Y - 11.f, 8.f, 22.f }, 4.f);
-    text(g, std::to_wstring(g_values.ticks), 22.f, COL_TEXT, { SLIDER_X1 + 8.f, SLIDER_Y - 16.f, 46.f, 32.f }, gp::StringAlignmentFar);
+        wchar_t sub[48];
+        if (i == 0) std::swprintf(sub, 48, L"%.1f ms", value * 1000.0 / 240.0);
+        else std::swprintf(sub, 48, L"%ls", value == 0 ? L"off" : L"softer ship");
+        text(g, sub, 12.f, COL_MUTED, { SLIDER_X0, cardY + 10.f, W - PAD - 18.f - SLIDER_X0, 24.f }, gp::StringAlignmentFar);
+
+        float tx = thumbX(i, value);
+        fillRound(g, COL_TRACK, { SLIDER_X0, y - 2.f, SLIDER_X1 - SLIDER_X0, 4.f }, 2.f);
+        if (tx > SLIDER_X0) fillRound(g, COL_TEXT, { SLIDER_X0, y - 2.f, tx - SLIDER_X0, 4.f }, 2.f);
+        fillRound(g, gp::Color(255, 0xff, 0xff, 0xff), { tx - 4.f, y - 11.f, 8.f, 22.f }, 4.f);
+
+        std::wstring label = std::to_wstring(value) + (i == 1 ? L"%" : L"");
+        text(g, label, 22.f, COL_TEXT, { SLIDER_X1 + 4.f, y - 16.f, 50.f, 32.f }, gp::StringAlignmentFar);
+    }
 
     // Toggle card
     card(g, { PAD, TOGGLE_CARD_Y, W - PAD * 2, TOGGLE_CARD_H });
@@ -386,7 +407,7 @@ void showWindow(HWND wnd, Values* values) {
 }
 
 void hide(HWND wnd) {
-    g_dragging = false;
+    g_dragging = -1;
     ReleaseCapture();
     bool hadFocus = GetForegroundWindow() == wnd;
     ShowWindow(wnd, SW_HIDE);
@@ -395,10 +416,10 @@ void hide(HWND wnd) {
     }
 }
 
-void setTicks(HWND wnd, int ticks, bool commit) {
-    ticks = std::clamp(ticks, 0, MAX_TICKS);
-    if (ticks != g_values.ticks) {
-        g_values.ticks = ticks;
+void setSlider(HWND wnd, int slider, int value, bool commit) {
+    value = std::clamp(value, 0, SLIDER_MAX[slider]);
+    if (value != g_values.sliders[slider]) {
+        g_values.sliders[slider] = value;
         InvalidateRect(wnd, nullptr, FALSE);
     }
     if (commit) save();
@@ -429,8 +450,8 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_PB_SYNC: {
             auto values = reinterpret_cast<Values*>(lParam);
-            if (!g_dragging) {
-                g_values.ticks = values->ticks;
+            if (g_dragging < 0) {
+                for (int i = 0; i < SLIDER_COUNT; ++i) g_values.sliders[i] = values->sliders[i];
                 for (int i = 0; i < TOGGLE_COUNT; ++i) g_values.toggles[i] = values->toggles[i];
                 InvalidateRect(wnd, nullptr, FALSE);
             }
@@ -475,8 +496,8 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_MOUSEMOVE: {
             float x = logicalX(lParam);
             float y = logicalY(lParam);
-            if (g_dragging) {
-                setTicks(wnd, ticksAt(x), false);
+            if (g_dragging >= 0) {
+                setSlider(wnd, g_dragging, valueAt(g_dragging, x), false);
                 return 0;
             }
             int hover = hitTest(x, y);
@@ -506,10 +527,15 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             else if (hit == HIT_MINIMIZE) {
                 ShowWindow(wnd, SW_MINIMIZE);
             }
-            else if (hit == HIT_SLIDER) {
-                g_dragging = true;
-                SetCapture(wnd);
-                setTicks(wnd, ticksAt(x), false);
+            else if (isSliderHit(hit)) {
+                int i = hit - HIT_SLIDER;
+                g_focusSlider = i;
+                // Only grab when clicking near the bar itself.
+                if (std::abs(y - sliderY(i)) <= 16.f && x >= SLIDER_X0 - 12.f && x <= SLIDER_X1 + 12.f) {
+                    g_dragging = i;
+                    SetCapture(wnd);
+                    setSlider(wnd, i, valueAt(i, x), false);
+                }
             }
             else if (hit >= HIT_TOGGLE && hit < HIT_TOGGLE + TOGGLE_COUNT) {
                 g_values.toggles[hit - HIT_TOGGLE] = !g_values.toggles[hit - HIT_TOGGLE];
@@ -520,8 +546,8 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
 
         case WM_LBUTTONUP:
-            if (g_dragging) {
-                g_dragging = false;
+            if (g_dragging >= 0) {
+                g_dragging = -1;
                 ReleaseCapture();
                 save();
                 InvalidateRect(wnd, nullptr, FALSE);
@@ -530,7 +556,10 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_MOUSEWHEEL: {
             int steps = GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
-            setTicks(wnd, g_values.ticks + steps, true);
+            // Scroll moves whichever slider the mouse is over.
+            int slider = isSliderHit(g_hover) ? g_hover - HIT_SLIDER : g_focusSlider;
+            g_focusSlider = slider;
+            setSlider(wnd, slider, g_values.sliders[slider] + steps, true);
             return 0;
         }
 
@@ -542,11 +571,11 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     return 0;
                 case VK_LEFT:
                 case VK_DOWN:
-                    setTicks(wnd, g_values.ticks - 1, true);
+                    setSlider(wnd, g_focusSlider, g_values.sliders[g_focusSlider] - 1, true);
                     return 0;
                 case VK_RIGHT:
                 case VK_UP:
-                    setTicks(wnd, g_values.ticks + 1, true);
+                    setSlider(wnd, g_focusSlider, g_values.sliders[g_focusSlider] + 1, true);
                     return 0;
             }
             break;
