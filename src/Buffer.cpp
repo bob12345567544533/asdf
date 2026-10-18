@@ -557,9 +557,9 @@ bool hitboxForgives(PlayLayer* layer, PlayerObject* p, GameObject* object) {
     float keep = 1.f - g_cfg.hitboxShrink;
     float w = box.size.width * keep;
     float h = box.size.height * keep;
-    CCRect small(box.getMidX() - w / 2.f, box.getMidY() - h / 2.f, w, h);
+    CCRect inner(box.getMidX() - w / 2.f, box.getMidY() - h / 2.f, w, h);
     CCRect hazard = object->getObjectRect();
-    return !small.intersectsRect(hazard);
+    return !inner.intersectsRect(hazard);
 }
 
 void onFrameEnd(PlayLayer* layer) {
