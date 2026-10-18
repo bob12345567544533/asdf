@@ -48,35 +48,52 @@ const gp::Color COL_CLOSE_HOVER(255, 0xc4, 0x2b, 0x1c);
 
 constexpr int MAX_TICKS = 24;
 constexpr int TOGGLE_COUNT = 5;
-constexpr size_t LOG_LINES = 10;
 
-// Layout in logical pixels (scaled by DPI when drawn).
-constexpr float W = 340.f;
+// Layout in logical pixels (scaled by DPI when drawn). Two columns:
+// sliders on the left, toggles and the log on the right.
 constexpr float TITLE_H = 40.f;
 constexpr float PAD = 12.f;
 constexpr float GAP = 8.f;
+constexpr float COL_W = 330.f;
+constexpr float W = PAD + COL_W + GAP + COL_W + PAD;
+constexpr float LEFT_X = PAD;
+constexpr float RIGHT_X = PAD + COL_W + GAP;
 
-// Sliders: 0 = buffer ticks, 1 = ship assist %.
-constexpr int SLIDER_COUNT = 2;
-constexpr int SLIDER_MAX[SLIDER_COUNT] { MAX_TICKS, 50 };
-constexpr char const* SLIDER_KEYS[SLIDER_COUNT] { "buffer-ticks", "ship-assist" };
-constexpr wchar_t const* SLIDER_NAMES[SLIDER_COUNT] { L"Buffer", L"Ship assist" };
+enum class Unit { Ticks, Percent, Pixels, Slower };
 
-constexpr float SLIDER_CARD_H = 92.f;
-constexpr float SLIDER_X0 = PAD + 18.f;
-constexpr float SLIDER_X1 = W - PAD - 64.f;
-constexpr float sliderCardY(int i) { return TITLE_H + GAP + i * (SLIDER_CARD_H + GAP); }
-constexpr float sliderY(int i) { return sliderCardY(i) + 64.f; }
+constexpr int SLIDER_COUNT = 9;
+constexpr int SLIDER_MAX[SLIDER_COUNT] { MAX_TICKS, 50, 50, 50, 12, 12, 50, 4, 50 };
+constexpr Unit SLIDER_UNIT[SLIDER_COUNT] {
+    Unit::Ticks, Unit::Percent, Unit::Percent, Unit::Percent,
+    Unit::Ticks, Unit::Ticks, Unit::Percent, Unit::Pixels, Unit::Slower
+};
+constexpr char const* SLIDER_KEYS[SLIDER_COUNT] {
+    "buffer-ticks", "ship-assist", "ufo-assist", "robot-assist",
+    "ledge-grace", "late-orbs", "hitbox-shrink", "wave-assist", "danger-slowmo"
+};
+constexpr wchar_t const* SLIDER_NAMES[SLIDER_COUNT] {
+    L"Buffer", L"Ship assist", L"UFO assist", L"Robot assist",
+    L"Ledge grace", L"Late orbs", L"Hitbox forgiveness", L"Wave assist", L"Danger slow-mo"
+};
+
+constexpr float SROW_H = 50.f;
+constexpr float SLIDER_CARD_Y = TITLE_H + GAP;
+constexpr float SLIDER_CARD_H = 10.f + SROW_H * SLIDER_COUNT;
+constexpr float SLIDER_X0 = LEFT_X + 16.f;
+constexpr float SLIDER_X1 = LEFT_X + COL_W - 16.f;
+constexpr float sliderRowY(int i) { return SLIDER_CARD_Y + 5.f + i * SROW_H; }
+constexpr float sliderY(int i) { return sliderRowY(i) + 35.f; }
 
 constexpr float ROW_H = 38.f;
-constexpr float TOGGLE_CARD_Y = sliderCardY(SLIDER_COUNT);
+constexpr float TOGGLE_CARD_Y = TITLE_H + GAP;
 constexpr float TOGGLE_CARD_H = ROW_H * TOGGLE_COUNT + 8.f;
 
 constexpr float LOG_LINE_H = 18.f;
 constexpr float LOG_CARD_Y = TOGGLE_CARD_Y + TOGGLE_CARD_H + GAP;
-constexpr float LOG_CARD_H = 34.f + LOG_LINE_H * LOG_LINES + 8.f;
+constexpr float LOG_CARD_H = SLIDER_CARD_Y + SLIDER_CARD_H - LOG_CARD_Y; // ends level with the sliders
+constexpr size_t LOG_LINES = static_cast<size_t>((LOG_CARD_H - 42.f) / LOG_LINE_H);
 
-constexpr float H = LOG_CARD_Y + LOG_CARD_H + 34.f;
+constexpr float H = SLIDER_CARD_Y + SLIDER_CARD_H + 34.f;
 
 constexpr UINT WM_PB_SHOW = WM_APP + 1;
 constexpr UINT WM_PB_HIDE = WM_APP + 2;
@@ -92,7 +109,7 @@ constexpr DWORD EXCLUDE_FROM_CAPTURE = 0x00000011;
 // ---------------------------------------------------------------------------
 
 struct Values {
-    int sliders[SLIDER_COUNT] { 2, 15 };
+    int sliders[SLIDER_COUNT] { 2, 15, 0, 0, 0, 0, 0, 0, 0 };
     bool toggles[TOGGLE_COUNT] { true, true, false, true, false };
     bool hasPos = false;
     int x = 0;
@@ -162,8 +179,22 @@ void savePosition(HWND wnd) {
 
 gp::RectF closeRect() { return { W - 40.f, 8.f, 28.f, 24.f }; }
 gp::RectF minimizeRect() { return { W - 72.f, 8.f, 28.f, 24.f }; }
-gp::RectF sliderHitRect(int i) { return { PAD, sliderCardY(i), W - PAD * 2, SLIDER_CARD_H }; }
-gp::RectF toggleRowRect(int i) { return { PAD, TOGGLE_CARD_Y + 4.f + i * ROW_H, W - PAD * 2, ROW_H }; }
+gp::RectF sliderHitRect(int i) { return { LEFT_X, sliderRowY(i), COL_W, SROW_H }; }
+gp::RectF toggleRowRect(int i) { return { RIGHT_X, TOGGLE_CARD_Y + 4.f + i * ROW_H, COL_W, ROW_H }; }
+
+std::wstring valueLabel(int slider, int value) {
+    if (value == 0) return L"off";
+    wchar_t buf[48];
+    switch (SLIDER_UNIT[slider]) {
+        case Unit::Ticks:
+            std::swprintf(buf, 48, L"%d tick%ls \u00b7 %.1f ms", value, value == 1 ? L"" : L"s", value * 1000.0 / 240.0);
+            break;
+        case Unit::Percent: std::swprintf(buf, 48, L"%d%%", value); break;
+        case Unit::Pixels: std::swprintf(buf, 48, L"%d px", value); break;
+        case Unit::Slower: std::swprintf(buf, 48, L"%d%% slower", value); break;
+    }
+    return buf;
+}
 
 float thumbX(int slider, int value) {
     return SLIDER_X0 + (SLIDER_X1 - SLIDER_X0) * (static_cast<float>(value) / SLIDER_MAX[slider]);
@@ -287,30 +318,32 @@ void paint(HWND wnd, HDC target) {
         g.DrawLine(&pen, cx + 5.f, cy - 5.f, cx - 5.f, cy + 5.f);
     }
 
-    // Slider cards
+    // Slider card (left column)
+    card(g, { LEFT_X, SLIDER_CARD_Y, COL_W, SLIDER_CARD_H });
     for (int i = 0; i < SLIDER_COUNT; ++i) {
-        float cardY = sliderCardY(i);
+        float rowY = sliderRowY(i);
         float y = sliderY(i);
         int value = g_values.sliders[i];
-        card(g, { PAD, cardY, W - PAD * 2, SLIDER_CARD_H }, g_hover == HIT_SLIDER + i || g_dragging == i);
-        text(g, SLIDER_NAMES[i], 14.f, COL_TEXT, { SLIDER_X0, cardY + 10.f, 160.f, 24.f }, gp::StringAlignmentNear, true);
+        bool active = g_hover == HIT_SLIDER + i || g_dragging == i;
 
-        wchar_t sub[48];
-        if (i == 0) std::swprintf(sub, 48, L"%.1f ms", value * 1000.0 / 240.0);
-        else std::swprintf(sub, 48, L"%ls", value == 0 ? L"off" : L"softer ship");
-        text(g, sub, 12.f, COL_MUTED, { SLIDER_X0, cardY + 10.f, W - PAD - 18.f - SLIDER_X0, 24.f }, gp::StringAlignmentFar);
+        if (active) fillRound(g, COL_CARD_HOVER, { LEFT_X + 4.f, rowY + 1.f, COL_W - 8.f, SROW_H - 2.f }, 4.f);
+        if (i > 0) {
+            gp::Pen sep(COL_BG, 1.f);
+            g.DrawLine(&sep, LEFT_X + 14.f, rowY, LEFT_X + COL_W - 14.f, rowY);
+        }
+
+        text(g, SLIDER_NAMES[i], 13.f, value > 0 ? COL_TEXT : COL_MUTED, { SLIDER_X0, rowY + 5.f, 190.f, 22.f });
+        text(g, valueLabel(i, value), 12.f, value > 0 ? COL_TEXT : COL_MUTED,
+             { SLIDER_X0, rowY + 5.f, SLIDER_X1 - SLIDER_X0, 22.f }, gp::StringAlignmentFar);
 
         float tx = thumbX(i, value);
         fillRound(g, COL_TRACK, { SLIDER_X0, y - 2.f, SLIDER_X1 - SLIDER_X0, 4.f }, 2.f);
         if (tx > SLIDER_X0) fillRound(g, COL_TEXT, { SLIDER_X0, y - 2.f, tx - SLIDER_X0, 4.f }, 2.f);
-        fillRound(g, gp::Color(255, 0xff, 0xff, 0xff), { tx - 4.f, y - 11.f, 8.f, 22.f }, 4.f);
-
-        std::wstring label = std::to_wstring(value) + (i == 1 ? L"%" : L"");
-        text(g, label, 22.f, COL_TEXT, { SLIDER_X1 + 4.f, y - 16.f, 50.f, 32.f }, gp::StringAlignmentFar);
+        fillRound(g, gp::Color(255, 0xff, 0xff, 0xff), { tx - 4.f, y - 9.f, 8.f, 18.f }, 4.f);
     }
 
-    // Toggle card
-    card(g, { PAD, TOGGLE_CARD_Y, W - PAD * 2, TOGGLE_CARD_H });
+    // Toggle card (right column)
+    card(g, { RIGHT_X, TOGGLE_CARD_Y, COL_W, TOGGLE_CARD_H });
     for (int i = 0; i < TOGGLE_COUNT; ++i) {
         auto row = toggleRowRect(i);
         if (g_hover == HIT_TOGGLE + i) {
@@ -320,21 +353,23 @@ void paint(HWND wnd, HDC target) {
             gp::Pen sep(COL_BG, 1.f);
             g.DrawLine(&sep, row.X + 14.f, row.Y, row.X + row.Width - 14.f, row.Y);
         }
-        text(g, TOGGLE_NAMES[i], 13.f, COL_TEXT, { row.X + 18.f, row.Y, 220.f, row.Height });
-        drawToggle(g, row.X + row.Width - 18.f - 38.f, row.Y + (row.Height - 20.f) / 2.f, g_values.toggles[i]);
+        text(g, TOGGLE_NAMES[i], 13.f, COL_TEXT, { row.X + 16.f, row.Y, 220.f, row.Height });
+        drawToggle(g, row.X + row.Width - 16.f - 38.f, row.Y + (row.Height - 20.f) / 2.f, g_values.toggles[i]);
     }
 
-    // Live log, newest on top
-    card(g, { PAD, LOG_CARD_Y, W - PAD * 2, LOG_CARD_H });
-    text(g, L"Log", 14.f, COL_TEXT, { SLIDER_X0, LOG_CARD_Y + 6.f, 120.f, 24.f }, gp::StringAlignmentNear, true);
+    // Live log (right column), newest on top
+    float logX = RIGHT_X + 16.f;
+    float logW = COL_W - 32.f;
+    card(g, { RIGHT_X, LOG_CARD_Y, COL_W, LOG_CARD_H });
+    text(g, L"Log", 14.f, COL_TEXT, { logX, LOG_CARD_Y + 6.f, 120.f, 24.f }, gp::StringAlignmentNear, true);
     if (g_log.empty()) {
-        text(g, L"Nothing yet", 12.f, COL_MUTED, { SLIDER_X0, LOG_CARD_Y + 34.f, W - PAD * 2 - 36.f, LOG_LINE_H });
+        text(g, L"Nothing yet", 12.f, COL_MUTED, { logX, LOG_CARD_Y + 34.f, logW, LOG_LINE_H });
     }
     for (size_t i = 0; i < g_log.size(); ++i) {
         // Older lines fade out a bit.
-        BYTE fade = static_cast<BYTE>(std::max(90, 240 - static_cast<int>(i) * 16));
+        BYTE fade = static_cast<BYTE>(std::max(90, 240 - static_cast<int>(i) * 14));
         text(g, g_log[i], 12.f, gp::Color(255, fade, fade, fade),
-             { SLIDER_X0, LOG_CARD_Y + 34.f + i * LOG_LINE_H, W - PAD * 2 - 36.f, LOG_LINE_H },
+             { logX, LOG_CARD_Y + 34.f + i * LOG_LINE_H, logW, LOG_LINE_H },
              gp::StringAlignmentNear, false, L"Consolas");
     }
 

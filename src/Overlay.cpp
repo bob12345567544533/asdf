@@ -57,8 +57,10 @@ void BufferOverlay::layout() {
         label->setScale(scale);
         label->setAnchorPoint(anchor);
     }
+    // Fixed rows: the popup always sits one row in from the corner, whether the
+    // counter is on or not, so the counter can never hide or move it.
     m_stats->setPosition({ x, y });
-    m_feedback->setPosition({ x, y + (m_stats->isVisible() ? lineHeight * dir : 0.f) });
+    m_feedback->setPosition({ x, y + lineHeight * dir });
 }
 
 void BufferOverlay::refresh() {
