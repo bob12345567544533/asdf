@@ -62,7 +62,7 @@ constexpr float RIGHT_X = PAD + COL_W + GAP;
 enum class Unit { Ticks, Percent, Pixels, Slower };
 
 constexpr int SLIDER_COUNT = 9;
-constexpr int SLIDER_MAX[SLIDER_COUNT] { MAX_TICKS, 50, 50, 50, 12, 12, 50, 4, 50 };
+constexpr int SLIDER_MAX[SLIDER_COUNT] { MAX_TICKS, 50, 50, 50, 12, 12, 50, 10, 50 };
 constexpr Unit SLIDER_UNIT[SLIDER_COUNT] {
     Unit::Ticks, Unit::Percent, Unit::Percent, Unit::Percent,
     Unit::Ticks, Unit::Ticks, Unit::Percent, Unit::Pixels, Unit::Slower
@@ -70,6 +70,17 @@ constexpr Unit SLIDER_UNIT[SLIDER_COUNT] {
 constexpr char const* SLIDER_KEYS[SLIDER_COUNT] {
     "buffer-ticks", "ship-assist", "ufo-assist", "robot-assist",
     "ledge-grace", "late-orbs", "hitbox-shrink", "wave-assist", "danger-slowmo"
+};
+constexpr wchar_t const* SLIDER_DESCS[SLIDER_COUNT] {
+    L"Holds clicks that are a little too early and would kill you, then fires them on the step where they survive.",
+    L"Makes the ship floatier so each tap moves it less. This changes ship physics.",
+    L"Makes the UFO floatier: smaller hops and slower falling.",
+    L"Makes the robot floatier: lower jumps and slower falling.",
+    L"Lets you still jump for a few ticks after running off a block (cube, robot, ball, spider).",
+    L"Orbs still activate if you click a few ticks after passing them (yellow, pink, red, blue, green, black).",
+    L"Spikes that only graze the outer edge of your hitbox don't kill you.",
+    L"Nudges the wave up to this many pixels away from corners it's about to clip.",
+    L"Slows the game down right before you'd die. The music doesn't slow with it.",
 };
 constexpr wchar_t const* SLIDER_NAMES[SLIDER_COUNT] {
     L"Buffer", L"Ship assist", L"UFO assist", L"Robot assist",
@@ -93,7 +104,8 @@ constexpr float LOG_CARD_Y = TOGGLE_CARD_Y + TOGGLE_CARD_H + GAP;
 constexpr float LOG_CARD_H = SLIDER_CARD_Y + SLIDER_CARD_H - LOG_CARD_Y; // ends level with the sliders
 constexpr size_t LOG_LINES = static_cast<size_t>((LOG_CARD_H - 42.f) / LOG_LINE_H);
 
-constexpr float H = SLIDER_CARD_Y + SLIDER_CARD_H + 34.f;
+constexpr float FOOTER_H = 52.f;
+constexpr float H = SLIDER_CARD_Y + SLIDER_CARD_H + FOOTER_H;
 
 constexpr UINT WM_PB_SHOW = WM_APP + 1;
 constexpr UINT WM_PB_HIDE = WM_APP + 2;
@@ -114,10 +126,18 @@ struct Values {
     bool hasPos = false;
     int x = 0;
     int y = 0;
+    int sizePercent = 100;
 };
 
 constexpr char const* TOGGLE_KEYS[TOGGLE_COUNT] {
     "enabled", "buffer-releases", "buffer-ship", "show-feedback", "show-stats"
+};
+constexpr wchar_t const* TOGGLE_DESCS[TOGGLE_COUNT] {
+    L"Turns everything in the mod on or off. Same as the toggle key (F6).",
+    L"Also buffers early releases for wave, ship and robot, where letting go too early kills you.",
+    L"Lets the buffer work in ship mode. Off by default since ship predictions are less reliable.",
+    L"Shows in-game how early each buffered click was.",
+    L"Shows an in-game line with how many clicks got buffered this attempt and this session.",
 };
 constexpr wchar_t const* TOGGLE_NAMES[TOGGLE_COUNT] {
     L"Enabled", L"Releases (wave, ship, robot)", L"Ship", L"Timing popup", L"Counter"
@@ -145,6 +165,7 @@ Values readSettings() {
     v.hasPos = mod->getSavedValue<bool>("window-has-pos", false);
     v.x = static_cast<int>(mod->getSavedValue<int64_t>("window-x", 0));
     v.y = static_cast<int>(mod->getSavedValue<int64_t>("window-y", 0));
+    v.sizePercent = static_cast<int>(mod->getSettingValue<int64_t>("window-size"));
     return v;
 }
 
@@ -272,6 +293,17 @@ void text(gp::Graphics& g, std::wstring const& s, float size, gp::Color color, g
     g.DrawString(s.c_str(), -1, &font, r, &fmt, &brush);
 }
 
+void wrappedText(gp::Graphics& g, std::wstring const& s, float size, gp::Color color, gp::RectF r) {
+    gp::FontFamily fam(L"Segoe UI");
+    gp::Font font(&fam, size, gp::FontStyleRegular, gp::UnitPixel);
+    gp::SolidBrush brush(color);
+    gp::StringFormat fmt;
+    fmt.SetAlignment(gp::StringAlignmentCenter);
+    fmt.SetLineAlignment(gp::StringAlignmentCenter);
+    fmt.SetTrimming(gp::StringTrimmingEllipsisWord);
+    g.DrawString(s.c_str(), -1, &font, r, &fmt, &brush);
+}
+
 void drawToggle(gp::Graphics& g, float x, float y, bool on) {
     fillRound(g, on ? COL_ACCENT : COL_TRACK, { x, y, 38.f, 20.f }, 10.f);
     float knobX = on ? x + 38.f - 17.f : x + 3.f;
@@ -373,9 +405,18 @@ void paint(HWND wnd, HDC target) {
              gp::StringAlignmentNear, false, L"Consolas");
     }
 
-    // Footer
-    text(g, L"F7 to show / hide  ·  scroll or arrows to adjust", 11.f, COL_MUTED,
-         { PAD, H - 30.f, W - PAD * 2, 22.f }, gp::StringAlignmentCenter);
+    // Footer: description of whatever is under the mouse, or the key hints.
+    gp::RectF footer(PAD, H - FOOTER_H + 4.f, W - PAD * 2, FOOTER_H - 10.f);
+    if (isSliderHit(g_hover) || g_dragging >= 0) {
+        int i = g_dragging >= 0 ? g_dragging : g_hover - HIT_SLIDER;
+        wrappedText(g, SLIDER_DESCS[i], 13.f, COL_TEXT, footer);
+    }
+    else if (g_hover >= HIT_TOGGLE && g_hover < HIT_TOGGLE + TOGGLE_COUNT) {
+        wrappedText(g, TOGGLE_DESCS[g_hover - HIT_TOGGLE], 13.f, COL_TEXT, footer);
+    }
+    else {
+        wrappedText(g, L"Hover a setting to see what it does  \u00b7  F7 to show / hide  \u00b7  scroll or arrows to adjust", 12.f, COL_MUTED, footer);
+    }
 
     gp::Graphics screen(target);
     screen.DrawImage(&buffer, 0, 0, pw, ph);
@@ -428,12 +469,35 @@ void place(HWND wnd, Values const& v) {
     }
 }
 
+// Size the window for the monitor it's on: 1x on 1080p, 1.33x on 1440p,
+// 2x on 4K, times the Window Size setting.
+void applyScale(HWND wnd) {
+    float monitorScale = 1.f;
+    MONITORINFO info { sizeof(info) };
+    if (GetMonitorInfoW(MonitorFromWindow(wnd, MONITOR_DEFAULTTONEAREST), &info)) {
+        float height = static_cast<float>(info.rcMonitor.bottom - info.rcMonitor.top);
+        monitorScale = std::clamp(height / 1080.f, 0.75f, 3.f);
+    }
+    float user = std::clamp(g_values.sizePercent / 100.f, 0.5f, 2.f);
+    float scale = std::clamp(monitorScale * user, 0.5f, 4.f);
+    if (std::abs(scale - g_scale) < 0.01f) return;
+
+    g_scale = scale;
+    SetWindowPos(
+        wnd, nullptr, 0, 0,
+        static_cast<int>(std::lround(W * g_scale)), static_cast<int>(std::lround(H * g_scale)),
+        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+    );
+    InvalidateRect(wnd, nullptr, FALSE);
+}
+
 void showWindow(HWND wnd, Values* values) {
     g_values = *values;
     if (!g_placed) {
         place(wnd, *values);
         g_placed = true;
     }
+    applyScale(wnd);
     delete values;
     g_hover = -1;
     // Don't steal focus from the game.
@@ -488,6 +552,8 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (g_dragging < 0) {
                 for (int i = 0; i < SLIDER_COUNT; ++i) g_values.sliders[i] = values->sliders[i];
                 for (int i = 0; i < TOGGLE_COUNT; ++i) g_values.toggles[i] = values->toggles[i];
+                g_values.sizePercent = values->sizePercent;
+                applyScale(wnd);
                 InvalidateRect(wnd, nullptr, FALSE);
             }
             delete values;
@@ -514,6 +580,7 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
 
         case WM_EXITSIZEMOVE:
+            applyScale(wnd); // moved to a different monitor?
             savePosition(wnd);
             return 0;
 
@@ -643,7 +710,7 @@ void windowThread() {
     auto instance = GetModuleHandleW(nullptr);
 
     HDC screen = GetDC(nullptr);
-    g_scale = GetDeviceCaps(screen, LOGPIXELSX) / 96.f;
+    g_scale = GetDeviceCaps(screen, LOGPIXELSX) / 96.f; // first guess, applyScale fixes it on show
     ReleaseDC(nullptr, screen);
     if (!(g_scale >= 1.f && g_scale <= 4.f)) g_scale = 1.f;
 

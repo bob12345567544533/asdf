@@ -1,3 +1,8 @@
+# v2.6.0
+- Wave assist goes up to 10 px (was 4).
+- The window sizes itself to the monitor it's on (1.33x on 1440p, 2x on 4K) and resizes when you drag it to another monitor. New Window Size setting on top of that.
+- Hovering a slider or toggle shows what it does at the bottom of the window.
+
 # v2.5.0
 - **New assists** (all off by default, set them in the F7 window):
   - UFO assist and robot assist: same idea as ship assist.

@@ -8,7 +8,7 @@
 	},
 	"id": "lilwc.input-buffer",
 	"name": "Input Buffer",
-	"version": "v2.5.0",
+	"version": "v2.6.0",
 	"developer": "lilWC",
 	"description": "Input timing tweaks.",
 	"tags": ["gameplay"],
@@ -98,7 +98,7 @@
 			"description": "Nudges the wave up to this many pixels away from corners it's about to clip. 0 = off.",
 			"default": 0,
 			"min": 0,
-			"max": 4,
+			"max": 10,
 			"control": { "arrow-step": 1, "slider-step": 1 }
 		},
 		"danger-slowmo": {
@@ -126,6 +126,15 @@
 			"type": "bool",
 			"name": "Open Window On Launch",
 			"default": true
+		},
+		"window-size": {
+			"type": "int",
+			"name": "Window Size (%)",
+			"description": "On top of the automatic sizing (1x on 1080p, 1.33x on 1440p).",
+			"default": 100,
+			"min": 50,
+			"max": 200,
+			"control": { "arrow-step": 5, "slider-step": 5 }
 		},
 		"display-title": {
 			"type": "title",

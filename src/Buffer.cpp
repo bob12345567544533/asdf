@@ -71,7 +71,7 @@ void refreshCachedSettings() {
     g_cfg.ledgeTicks = static_cast<int>(std::clamp<int64_t>(setting<int64_t>("ledge-grace"), 0, 12));
     g_cfg.orbTicks = static_cast<int>(std::clamp<int64_t>(setting<int64_t>("late-orbs"), 0, 12));
     g_cfg.hitboxShrink = percentSetting("hitbox-shrink");
-    g_cfg.wavePixels = static_cast<int>(std::clamp<int64_t>(setting<int64_t>("wave-assist"), 0, 4));
+    g_cfg.wavePixels = static_cast<int>(std::clamp<int64_t>(setting<int64_t>("wave-assist"), 0, 10));
     g_cfg.slowmo = percentSetting("danger-slowmo");
 }
 
