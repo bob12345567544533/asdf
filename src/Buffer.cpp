@@ -12,6 +12,10 @@ namespace pb {
 // Hard cap on how far an input can be pushed back, whatever the settings say.
 static constexpr int MAX_DELAY_TICKS = 24;
 
+// Most ghost physics steps one click may cost. Keeps a worst-case click (one
+// that dies no matter what) from causing a frame hitch.
+static constexpr int STEP_BUDGET = 2400;
+
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
@@ -41,7 +45,7 @@ char const* modeName(Mode mode) {
     return "?";
 }
 
-bool isFlyingMode(Mode mode) {
+static bool isFlyingMode(Mode mode) {
     return mode == Mode::Ship || mode == Mode::Ufo || mode == Mode::Wave || mode == Mode::Swing;
 }
 
@@ -55,32 +59,15 @@ static T setting(char const* key) {
     return Mod::get()->getSettingValue<T>(key);
 }
 
-static float percentSetting(char const* key) {
-    double value = static_cast<double>(setting<int64_t>(key)) / 100.0;
-    return static_cast<float>(std::clamp(value, 0.0, 0.5));
-}
-
-void refreshCachedSettings() {
-    if (!setting<bool>("enabled")) {
-        g_cfg = Config {};
-        return;
-    }
-    g_cfg.shipAssist = percentSetting("ship-assist");
-    g_cfg.ufoAssist = percentSetting("ufo-assist");
-    g_cfg.robotAssist = percentSetting("robot-assist");
-    g_cfg.ledgeTicks = static_cast<int>(std::clamp<int64_t>(setting<int64_t>("ledge-grace"), 0, 12));
-    g_cfg.orbTicks = static_cast<int>(std::clamp<int64_t>(setting<int64_t>("late-orbs"), 0, 12));
-    g_cfg.hitboxShrink = percentSetting("hitbox-shrink");
-    g_cfg.wavePixels = static_cast<int>(std::clamp<int64_t>(setting<int64_t>("wave-assist"), 0, 10));
-    g_cfg.slowmo = percentSetting("danger-slowmo");
-}
-
-static int trackIndex(PlayLayer* layer, PlayerObject* p) {
-    return layer && p == layer->m_player2 ? 1 : 0;
-}
-
 bool isGhost(PlayerObject* player) {
-    return player && (player == g.ghosts[0] || player == g.ghosts[1]);
+    return ghostIndex(player) >= 0;
+}
+
+int ghostIndex(PlayerObject* player) {
+    if (!player) return -1;
+    if (player == g.ghosts[0]) return 0;
+    if (player == g.ghosts[1]) return 1;
+    return -1;
 }
 
 void setGhosts(PlayerObject* a, PlayerObject* b) {
@@ -122,6 +109,55 @@ static bool touchingRing(PlayerObject* p) {
     return p->m_touchingRings && p->m_touchingRings->count() > 0;
 }
 
+bool stopsSimulation(GameObject* object, PlayerObject* ghost) {
+    switch (object->m_objectType) {
+        // Portals, pads and teleports act on contact.
+        case GameObjectType::InverseGravityPortal:
+        case GameObjectType::NormalGravityPortal:
+        case GameObjectType::GravityTogglePortal:
+        case GameObjectType::ShipPortal:
+        case GameObjectType::CubePortal:
+        case GameObjectType::BallPortal:
+        case GameObjectType::UfoPortal:
+        case GameObjectType::WavePortal:
+        case GameObjectType::RobotPortal:
+        case GameObjectType::SpiderPortal:
+        case GameObjectType::SwingPortal:
+        case GameObjectType::InverseMirrorPortal:
+        case GameObjectType::NormalMirrorPortal:
+        case GameObjectType::RegularSizePortal:
+        case GameObjectType::MiniSizePortal:
+        case GameObjectType::DualPortal:
+        case GameObjectType::SoloPortal:
+        case GameObjectType::TeleportPortal:
+        case GameObjectType::YellowJumpPad:
+        case GameObjectType::PinkJumpPad:
+        case GameObjectType::RedJumpPad:
+        case GameObjectType::GravityPad:
+        case GameObjectType::SpiderPad:
+            return true;
+
+        // Orbs only do something while the button is held.
+        case GameObjectType::YellowJumpRing:
+        case GameObjectType::PinkJumpRing:
+        case GameObjectType::RedJumpRing:
+        case GameObjectType::GravityRing:
+        case GameObjectType::GreenRing:
+        case GameObjectType::DropRing:
+        case GameObjectType::CustomRing:
+        case GameObjectType::DashRing:
+        case GameObjectType::GravityDashRing:
+        case GameObjectType::SpiderOrb:
+        case GameObjectType::TeleportOrb: {
+            int i = ghostIndex(ghost);
+            return i >= 0 && g_simHeld[i];
+        }
+
+        default:
+            return false;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Simulation
 // ---------------------------------------------------------------------------
@@ -132,16 +168,19 @@ struct SimGuard {
     SimGuard() {
         g_simulating = true;
         g_simDied = false;
+        g_simStopped = false;
     }
     ~SimGuard() {
         g_simulating = false;
         g_simDied = false;
+        g_simStopped = false;
     }
 };
 
 struct SimResult {
     bool died = false;
-    int steps = 0; // steps survived (the whole run if it didn't die)
+    bool stopped = false; // reached something the sim can't model, counts as alive
+    int steps = 0;        // steps survived (the whole run if it didn't die)
 };
 
 struct SimSetup {
@@ -152,14 +191,18 @@ struct SimSetup {
     int horizon = 48;
     float dt = 0.25f;
     bool earlyExit = false; // grounded modes: a safe landing counts as survived
-    bool applyInput = true; // false: keep the button as it is now (danger checks)
-    std::array<bool, 2> held { false, false }; // current button per player, for applyInput = false
-    float yOffset = 0.f;    // shift the ghosts up/down (wave nudge test)
 };
+
+void setHeld(PlayerObject* ghost, int index, bool held) {
+    if (held) ghost->pushButton(PlayerButton::Jump);
+    else ghost->releaseButton(PlayerButton::Jump);
+    g_simHeld[index] = held;
+}
 
 // Copies the real players onto the hidden ghosts, applies the input after
 // `delay` steps, and runs the game's own physics and collision forward.
-SimResult simulate(SimSetup const& s, int delay) {
+// `budget` is decreased by the number of steps used.
+SimResult simulate(SimSetup const& s, int delay, int& budget) {
     SimGuard guard;
 
     std::array<PlayerObject*, 2> ghosts { nullptr, nullptr };
@@ -187,16 +230,9 @@ SimResult simulate(SimSetup const& s, int delay) {
         ghost->m_holdingRight = real->m_holdingRight;
         ghost->m_platformerXVelocity = real->m_platformerXVelocity;
 
-        if (s.yOffset != 0.f) {
-            auto pos = real->getPosition();
-            ghost->setPosition({ pos.x, pos.y + s.yOffset });
-        }
-
         // Ghosts get reused, so set the button to what the real player is doing
         // right now: up if this input is a press, held if it's a release.
-        bool hold = s.applyInput ? !s.down : s.held[i];
-        if (hold) ghost->pushButton(PlayerButton::Jump);
-        else ghost->releaseButton(PlayerButton::Jump);
+        setHeld(ghost, static_cast<int>(i), !s.down);
 
         ghosts[i] = ghost;
     }
@@ -206,29 +242,30 @@ SimResult simulate(SimSetup const& s, int delay) {
     int grounded = 0;
 
     for (int step = 0; step < total; ++step) {
+        // Out of time: count it as a death so an unchecked delay never gets used.
+        if (--budget < 0) return { true, false, -1 };
+
         for (size_t i = 0; i < s.count; ++i) {
             ghosts[i]->m_collisionLogTop->removeAllObjects();
             ghosts[i]->m_collisionLogBottom->removeAllObjects();
             ghosts[i]->m_collisionLogLeft->removeAllObjects();
             ghosts[i]->m_collisionLogRight->removeAllObjects();
             s.layer->checkCollisions(ghosts[i], s.dt, false);
-            if (g_simDied) return { true, step };
+            if (g_simDied) return { true, false, step };
+            if (g_simStopped) return { false, true, step };
         }
 
         // Pressing after the collision pass matches how the game applies a
         // fresh input (it gives the shorter first jump, like the real thing).
-        if (s.applyInput && step == delay) {
-            for (size_t i = 0; i < s.count; ++i) {
-                if (s.down) ghosts[i]->pushButton(PlayerButton::Jump);
-                else ghosts[i]->releaseButton(PlayerButton::Jump);
-            }
+        if (step == delay) {
+            for (size_t i = 0; i < s.count; ++i) setHeld(ghosts[i], static_cast<int>(i), s.down);
         }
 
         for (size_t i = 0; i < s.count; ++i) {
             ghosts[i]->update(s.dt);
             ghosts[i]->updateRotation(s.dt);
         }
-        if (g_simDied) return { true, step };
+        if (g_simDied) return { true, false, step };
 
         // Jumped, then landed and stayed on the ground: that's a safe outcome.
         if (s.earlyExit && step > delay) {
@@ -241,11 +278,11 @@ SimResult simulate(SimSetup const& s, int delay) {
                 grounded = 0;
             }
             else if (airborne >= 6 && ++grounded >= 3) {
-                return { false, total };
+                return { false, false, total };
             }
         }
     }
-    return { false, total };
+    return { false, false, total };
 }
 
 void fire(PlayLayer* layer, QueuedInput const& input) {
@@ -288,82 +325,6 @@ void onStep(PlayLayer* layer, float dt) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Late click assists
-// ---------------------------------------------------------------------------
-
-static bool lateOrbType(GameObjectType type) {
-    switch (type) {
-        case GameObjectType::YellowJumpRing:
-        case GameObjectType::PinkJumpRing:
-        case GameObjectType::RedJumpRing:
-        case GameObjectType::GravityRing:
-        case GameObjectType::GreenRing:
-        case GameObjectType::DropRing:
-            return true;
-        default:
-            return false;
-    }
-}
-
-// Window setting is in 240 TPS ticks; convert to steps at the current TPS.
-static int windowSteps(int ticks240, PlayLayer* layer) {
-    return msToTicks(ticks240 * 1000.0 / 240.0, tickMs(layer));
-}
-
-static bool tryLateOrb(PlayLayer* layer, SimSetup const& s, bool isPlayer1) {
-    if (g_cfg.orbTicks <= 0) return false;
-    int window = std::max(1, windowSteps(g_cfg.orbTicks, layer));
-
-    std::array<std::pair<PlayerObject*, RingObject*>, 2> hits {};
-    size_t count = 0;
-    int late = 0;
-    for (size_t i = 0; i < s.count; ++i) {
-        auto p = s.reals[i];
-        if (!p || p->m_isDead || p->m_isOnGround || touchingRing(p)) continue;
-        auto& t = g.track[trackIndex(layer, p)];
-        if (!t.ring) continue;
-        int age = g.tick - t.ringTick;
-        if (age <= 0 || age > window) continue;
-        hits[count++] = { p, t.ring };
-        late = std::max(late, age);
-    }
-    if (count == 0) return false;
-
-    // Let the click through first so the game sees the button as held.
-    g_bypass = true;
-    layer->handleButton(true, static_cast<int>(PlayerButton::Jump), isPlayer1);
-    g_bypass = false;
-
-    for (size_t i = 0; i < count; ++i) {
-        hits[i].first->ringJump(hits[i].second, true);
-        g.track[trackIndex(layer, hits[i].first)].ring = nullptr;
-    }
-    menu::log(fmt::format("late orb  +{} tick{}", late, late == 1 ? "" : "s"));
-    return true;
-}
-
-static void tryLedgeGrace(PlayLayer* layer, SimSetup const& s) {
-    if (g_cfg.ledgeTicks <= 0) return;
-    int window = std::max(1, windowSteps(g_cfg.ledgeTicks, layer));
-
-    for (size_t i = 0; i < s.count; ++i) {
-        auto p = s.reals[i];
-        if (!p || p->m_isDead || p->m_isOnGround) continue;
-        Mode mode = modeOf(p);
-        if (mode != Mode::Cube && mode != Mode::Robot && mode != Mode::Ball && mode != Mode::Spider) continue;
-
-        auto& t = g.track[trackIndex(layer, p)];
-        int age = g.tick - t.leftGroundTick;
-        if (t.leftByJump || age <= 0 || age > window) continue;
-
-        // Count as still standing on the ledge for this click.
-        p->m_isOnGround = true;
-        t.leftByJump = true; // only once per ledge
-        menu::log(fmt::format("ledge grace  +{} tick{}", age, age == 1 ? "" : "s"));
-    }
-}
-
 bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
     if (g_bypass || g_simulating) return false;
     if (button != static_cast<int>(PlayerButton::Jump)) return false;
@@ -401,18 +362,12 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
         if (dual) s.reals[s.count++] = p2;
     }
 
-    // Late clicks: an orb you just passed, or a ledge you just ran off.
-    if (down && tryLateOrb(layer, s, isPlayer1)) return true;
-    if (down) tryLedgeGrace(layer, s);
-
     for (size_t i = 0; i < s.count; ++i) {
         auto p = s.reals[i];
         if (!p || !g.ghosts[i]) return false;
         if (p->m_isDead || p->m_isDashing || touchingRing(p)) return false;
     }
 
-    // Work out the allowed delay. In dual with two different modes, the
-    // stricter one wins.
     double perTick = tickMs(layer);
     bool bufferReleases = setting<bool>("buffer-releases");
     bool bufferShip = setting<bool>("buffer-ship");
@@ -421,6 +376,7 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
     // same thing if you change TPS.
     double maxMs = static_cast<double>(setting<int64_t>("buffer-ticks")) * 1000.0 / 240.0;
     int limit = std::min(MAX_DELAY_TICKS, msToTicks(maxMs, perTick));
+
     bool anyWave = false;
     bool anyMini = false;
     bool anyFlying = false;
@@ -430,7 +386,6 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
         auto p = s.reals[i];
         Mode mode = modeOf(p);
         if (!down && (!bufferReleases || !releaseMatters(mode))) return false;
-
         if (mode == Mode::Ship && !bufferShip) return false;
         anyWave |= mode == Mode::Wave;
         anyMini |= p->m_vehicleSize < 1.f;
@@ -446,38 +401,46 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
 
     int minGain = std::max(1, msToTicks(setting<double>("min-gain-ms"), perTick));
     bool debug = setting<bool>("debug-log");
+    int budget = STEP_BUDGET;
 
-    // Would this input kill you if it went through right now?
-    auto base = simulate(s, 0);
+    // Would this input kill you if it went through right now? If the ghost
+    // survives, or reaches a portal/pad/orb first, let it through untouched.
+    auto base = simulate(s, 0, budget);
     if (!base.died) return false;
 
+    auto survives = [&](SimResult const& r) {
+        return !r.died || r.steps - base.steps >= minGain;
+    };
+
     // Find the smallest delay that clearly survives longer.
-    for (int delay = 1; delay <= limit; ++delay) {
-        auto result = simulate(s, delay);
-        bool ok = !result.died || result.steps - base.steps >= minGain;
-        if (!ok) continue;
+    for (int delay = 1; delay <= limit && budget > 0; ++delay) {
+        auto result = simulate(s, delay, budget);
+        if (!survives(result)) continue;
 
-        ch.shift = delay;
-        ch.queue.push_back({ down, isPlayer1, g.tick + 1 + delay });
+        // The first working delay sits right at the edge where a hair earlier
+        // still dies. If one more step also works, use that for some margin.
+        int chosen = delay;
+        if (delay + 1 <= limit && budget > 0 && survives(simulate(s, delay + 1, budget))) {
+            chosen = delay + 1;
+        }
 
-        double earlyMs = delay * perTick;
-        g.stats.attemptCount++;
-        g.stats.sessionCount++;
-        g.stats.sessionEarlyMs += earlyMs;
+        ch.shift = chosen;
+        ch.queue.push_back({ down, isPlayer1, g.tick + 1 + chosen });
 
+        double earlyMs = chosen * perTick;
         if (debug) {
             log::info(
                 "{} buffered by {} steps ({:.2f}ms, {}): dies after {} steps now, {} after delay",
-                down ? "Press" : "Release", delay, earlyMs, modeName(mainMode),
-                base.steps, result.died ? fmt::format("{}", result.steps) : std::string("survives")
+                down ? "Press" : "Release", chosen, earlyMs, modeName(mainMode), base.steps,
+                result.died ? fmt::format("{}", result.steps) : std::string(result.stopped ? "reaches a portal/pad/orb" : "survives")
             );
         }
         if (auto overlay = BufferOverlay::get(layer)) {
-            overlay->showBuffered(earlyMs, delay, mainMode, !down);
+            overlay->showBuffered(earlyMs, chosen, mainMode, !down);
         }
         menu::log(fmt::format(
             "+{} tick{} ({:.1f} ms)  {} {}",
-            delay, delay == 1 ? "" : "s", earlyMs, modeName(mainMode), down ? "press" : "release"
+            chosen, chosen == 1 ? "" : "s", earlyMs, modeName(mainMode), down ? "press" : "release"
         ));
         return true;
     }
@@ -489,142 +452,6 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
         );
     }
     return false;
-}
-
-// ---------------------------------------------------------------------------
-// Assist tracking and per-frame checks
-// ---------------------------------------------------------------------------
-
-void resetTracks() {
-    g.track = {};
-    g.slowFactor = 1.f;
-}
-
-void noteHeld(PlayLayer* layer, bool down, int button, bool isPlayer1) {
-    if (g_simulating || button != static_cast<int>(PlayerButton::Jump)) return;
-    bool twoPlayer = layer->m_levelSettings && layer->m_levelSettings->m_twoPlayerMode;
-    if (twoPlayer) {
-        g.track[isPlayer1 ? 0 : 1].held = down;
-    }
-    else {
-        g.track[0].held = down;
-        g.track[1].held = down;
-    }
-}
-
-void beforeRealUpdate(PlayLayer* layer, PlayerObject* p) {
-    auto& t = g.track[trackIndex(layer, p)];
-    bool now = p->m_isOnGround;
-    if (t.prevOnGround && !now) {
-        // Just left the ground. Moving up fast means it was a jump.
-        double up = p->m_isUpsideDown ? -p->m_yVelocity : p->m_yVelocity;
-        t.leftGroundTick = g.tick;
-        t.leftByJump = up > 1.0;
-    }
-    t.prevOnGround = now;
-}
-
-float assistFor(PlayLayer* layer, PlayerObject* p) {
-    if (!layer || p->m_gameLayer != layer || p->m_isDead || p->m_isSwing) return 0.f;
-    if (p->m_isShip) return g_cfg.shipAssist;
-    if (p->m_isBird) return g_cfg.ufoAssist;
-    if (p->m_isRobot) return g_cfg.robotAssist;
-    return 0.f;
-}
-
-void noteRingTouched(PlayLayer* layer, PlayerObject* p, RingObject* ring) {
-    if (g_simulating || !ring || !lateOrbType(ring->m_objectType)) return;
-    if (p != layer->m_player1 && p != layer->m_player2) return;
-    auto& t = g.track[trackIndex(layer, p)];
-    t.ring = ring;
-    t.ringTick = g.tick;
-}
-
-void noteRingUsed(PlayLayer* layer, PlayerObject* p) {
-    if (g_simulating) return;
-    if (p != layer->m_player1 && p != layer->m_player2) return;
-    g.track[trackIndex(layer, p)].ring = nullptr;
-}
-
-bool hitboxForgives(PlayLayer* layer, PlayerObject* p, GameObject* object) {
-    if (g_cfg.hitboxShrink <= 0.f || !layer || !p || !object) return false;
-    // Never touch the game's own anti-cheat check.
-    if (object == layer->m_anticheatSpike) return false;
-    auto type = object->m_objectType;
-    if (type != GameObjectType::Hazard && type != GameObjectType::AnimatedHazard) return false;
-
-    CCRect box = p->getObjectRect();
-    float keep = 1.f - g_cfg.hitboxShrink;
-    float w = box.size.width * keep;
-    float h = box.size.height * keep;
-    CCRect inner(box.getMidX() - w / 2.f, box.getMidY() - h / 2.f, w, h);
-    CCRect hazard = object->getObjectRect();
-    return !inner.intersectsRect(hazard);
-}
-
-void onFrameEnd(PlayLayer* layer) {
-    g.slowFactor = 1.f;
-    if (g_cfg.slowmo <= 0.f && g_cfg.wavePixels <= 0) return;
-    if (layer->m_levelEndAnimationStarted || layer->m_isPaused) return;
-    if (!g.ghosts[0] || !g.ghosts[1]) return;
-    // A queued input is about to fire; the check can't know about it.
-    for (auto& ch : g.channels) {
-        if (!ch.queue.empty()) return;
-    }
-
-    auto p1 = layer->m_player1;
-    auto p2 = layer->m_player2;
-    if (!p1 || p1->m_isDead) return;
-
-    SimSetup s;
-    s.layer = layer;
-    s.applyInput = false;
-    s.reals[s.count++] = p1;
-    if (layer->m_gameState.m_isDualMode && p2 && !p2->m_isDead) s.reals[s.count++] = p2;
-    s.held = { g.track[0].held, g.track[1].held };
-    s.dt = g.lastStepDt > 0.0001f && g.lastStepDt < 2.f ? g.lastStepDt : 0.25f;
-
-    bool anyWave = false;
-    bool anyFlying = false;
-    for (size_t i = 0; i < s.count; ++i) {
-        if (s.reals[i]->m_isDashing) return;
-        Mode mode = modeOf(s.reals[i]);
-        anyWave |= mode == Mode::Wave;
-        anyFlying |= isFlyingMode(mode);
-    }
-    s.earlyExit = !anyFlying;
-    double perTick = tickMs(layer);
-
-    // Wave nudge: about to clip something in the next few steps? See if a
-    // pixel or two up or down avoids it, and if so, move there.
-    if (g_cfg.wavePixels > 0 && anyWave && g.tick - g.track[0].lastNudgeTick >= 6) {
-        s.horizon = 10;
-        if (simulate(s, 0).died) {
-            for (int px = 1; px <= g_cfg.wavePixels; ++px) {
-                bool done = false;
-                for (float sign : { 1.f, -1.f }) {
-                    s.yOffset = sign * px;
-                    if (simulate(s, 0).died) continue;
-                    for (size_t i = 0; i < s.count; ++i) {
-                        auto pos = s.reals[i]->getPosition();
-                        s.reals[i]->setPosition({ pos.x, pos.y + s.yOffset });
-                    }
-                    g.track[0].lastNudgeTick = g.tick;
-                    menu::log(fmt::format("wave nudge  {}{}px", sign > 0 ? "+" : "-", px));
-                    done = true;
-                    break;
-                }
-                if (done) break;
-            }
-            s.yOffset = 0.f;
-        }
-    }
-
-    // Danger slow-mo: if the current path dies soon, slow the next frame down.
-    if (g_cfg.slowmo > 0.f) {
-        s.horizon = std::max(4, msToTicks(150.0, perTick));
-        if (simulate(s, 0).died) g.slowFactor = 1.f - g_cfg.slowmo;
-    }
 }
 
 } // namespace pb

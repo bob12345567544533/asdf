@@ -6,9 +6,9 @@
 		"mac": "2.2081",
 		"ios": "2.2081"
 	},
-	"id": "lilwc.input-buffer",
-	"name": "Input Buffer",
-	"version": "v2.6.1",
+	"id": "lilwc.input-buffer-lite",
+	"name": "Input Buffer Lite",
+	"version": "v1.0.0",
 	"developer": "lilWC",
 	"description": "Input timing tweaks.",
 	"tags": ["gameplay"],
@@ -37,78 +37,6 @@
 			"type": "bool",
 			"name": "Ship",
 			"default": false
-		},
-		"ship-assist": {
-			"type": "int",
-			"name": "Ship Assist (%)",
-			"description": "Makes the ship a bit floatier. 0 = off.",
-			"default": 15,
-			"min": 0,
-			"max": 50,
-			"control": { "arrow-step": 1, "slider-step": 1 }
-		},
-		"ufo-assist": {
-			"type": "int",
-			"name": "UFO Assist (%)",
-			"description": "Makes the UFO a bit floatier. 0 = off.",
-			"default": 0,
-			"min": 0,
-			"max": 50,
-			"control": { "arrow-step": 1, "slider-step": 1 }
-		},
-		"robot-assist": {
-			"type": "int",
-			"name": "Robot Assist (%)",
-			"description": "Makes the robot a bit floatier. 0 = off.",
-			"default": 0,
-			"min": 0,
-			"max": 50,
-			"control": { "arrow-step": 1, "slider-step": 1 }
-		},
-		"ledge-grace": {
-			"type": "int",
-			"name": "Ledge Grace (ticks)",
-			"description": "Lets you still jump for a few ticks after running off a block. 0 = off.",
-			"default": 0,
-			"min": 0,
-			"max": 12,
-			"control": { "arrow-step": 1, "slider-step": 1 }
-		},
-		"late-orbs": {
-			"type": "int",
-			"name": "Late Orbs (ticks)",
-			"description": "Orbs still activate if you click a few ticks after passing them. 0 = off.",
-			"default": 0,
-			"min": 0,
-			"max": 12,
-			"control": { "arrow-step": 1, "slider-step": 1 }
-		},
-		"hitbox-shrink": {
-			"type": "int",
-			"name": "Hitbox Forgiveness (%)",
-			"description": "Spikes that only graze the edge of your hitbox don't kill you. 0 = off.",
-			"default": 0,
-			"min": 0,
-			"max": 50,
-			"control": { "arrow-step": 1, "slider-step": 1 }
-		},
-		"wave-assist": {
-			"type": "int",
-			"name": "Wave Assist (px)",
-			"description": "Nudges the wave up to this many pixels away from corners it's about to clip. 0 = off.",
-			"default": 0,
-			"min": 0,
-			"max": 10,
-			"control": { "arrow-step": 1, "slider-step": 1 }
-		},
-		"danger-slowmo": {
-			"type": "int",
-			"name": "Danger Slow-Mo (%)",
-			"description": "Slows the game down this much right before you'd die. 0 = off.",
-			"default": 0,
-			"min": 0,
-			"max": 50,
-			"control": { "arrow-step": 1, "slider-step": 1 }
 		},
 		"toggle-key": {
 			"type": "keybind",
@@ -144,11 +72,6 @@
 			"type": "bool",
 			"name": "Timing Popup",
 			"default": true
-		},
-		"show-stats": {
-			"type": "bool",
-			"name": "Counter",
-			"default": false
 		},
 		"label-position": {
 			"type": "string",

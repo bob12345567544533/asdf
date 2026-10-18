@@ -4,7 +4,7 @@
 
 namespace pb {
 
-// The on-screen text: a short "how early was that" popup plus an optional counter.
+// The on-screen "how early was that" popup.
 class BufferOverlay : public cocos2d::CCNode {
 public:
     static BufferOverlay* create();
@@ -12,16 +12,12 @@ public:
 
     void showBuffered(double earlyMs, int ticks, Mode mode, bool release);
     void showToggle(bool enabled);
-    void refresh();
 
 protected:
     bool init() override;
-    void layout();
     void popup(std::string const& text, cocos2d::ccColor3B color);
-    cocos2d::CCLabelBMFont* setLabel(cocos2d::CCLabelBMFont*& label, std::string const& text);
 
-    cocos2d::CCLabelBMFont* m_feedback = nullptr;
-    cocos2d::CCLabelBMFont* m_stats = nullptr;
+    cocos2d::CCLabelBMFont* m_label = nullptr;
 };
 
 } // namespace pb

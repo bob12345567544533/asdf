@@ -35,9 +35,7 @@ class $modify(PBPlayLayer, PlayLayer) {
 
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
         pb::clearQueues();
-        pb::resetTracks();
         pb::g.tick = 0;
-        pb::g.stats.attemptCount = 0;
 
         if (!PlayLayer::init(level, useReplay, dontCreateObjects)) return false;
 
@@ -53,11 +51,8 @@ class $modify(PBPlayLayer, PlayLayer) {
 
     void resetLevel() {
         pb::clearQueues();
-        pb::resetTracks();
         pb::g.tick = 0;
-        pb::g.stats.attemptCount = 0;
         PlayLayer::resetLevel();
-        if (auto overlay = pb::BufferOverlay::get(this)) overlay->refresh();
     }
 
     void onQuit() {
@@ -69,12 +64,9 @@ class $modify(PBPlayLayer, PlayLayer) {
     void destroyPlayer(PlayerObject* player, GameObject* object) {
         if (pb::g_simulating) {
             // A ghost hit something. Note it and stop: no death effects, no reset.
-            // Same hitbox rule as the real player so predictions match.
-            if (pb::isGhost(player) && !pb::hitboxForgives(this, player, object)) pb::g_simDied = true;
+            if (pb::isGhost(player)) pb::g_simDied = true;
             return;
         }
-        // Hitbox forgiveness: a hazard that only grazed the outer edge doesn't count.
-        if (pb::hitboxForgives(this, player, object)) return;
         PlayLayer::destroyPlayer(player, object);
         // Only drop held inputs if you actually died (noclip keeps you alive).
         if (player && player->m_isDead) pb::clearQueues();
@@ -83,11 +75,6 @@ class $modify(PBPlayLayer, PlayLayer) {
     void playEndAnimationToPos(CCPoint pos) {
         if (pb::g_simulating) return;
         PlayLayer::playEndAnimationToPos(pos);
-    }
-
-    void postUpdate(float dt) {
-        PlayLayer::postUpdate(dt);
-        pb::onFrameEnd(this);
     }
 };
 
@@ -100,22 +87,13 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
         auto pl = PlayLayer::get();
         if (pl && static_cast<GJBaseGameLayer*>(pl) == this) {
             if (pb::onButton(pl, down, button, isPlayer1)) return;
-            pb::noteHeld(pl, down, button, isPlayer1);
         }
         GJBaseGameLayer::handleButton(down, button, isPlayer1);
     }
 
-    void update(float dt) {
-        // Danger slow-mo: run this frame a bit slower if the last check saw trouble.
-        auto pl = PlayLayer::get();
-        if (pl && static_cast<GJBaseGameLayer*>(pl) == this && pb::g.slowFactor < 1.f) {
-            dt *= pb::g.slowFactor;
-        }
-        GJBaseGameLayer::update(dt);
-    }
-
-    // Ghosts only collide with blocks, slopes and hazards. Orbs, pads, portals,
-    // coins and triggers would change the real level state, so they're skipped.
+    // Ghosts only collide with blocks, slopes and hazards. Touching a portal,
+    // pad or orb (while holding) ends the simulation instead of being ignored,
+    // because the ghost can't use them without changing the real level.
     void collisionCheckObjects(PlayerObject* player, gd::vector<GameObject*>* objects, int count, float dt) {
         if (!pb::g_simulating || !objects) {
             return GJBaseGameLayer::collisionCheckObjects(player, objects, count, dt);
@@ -127,6 +105,7 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
         auto& filtered = depth == 0 ? shared : local;
         filtered.clear();
 
+        CCRect ghostBox = player->getObjectRect();
         int n = std::min<int>(count, static_cast<int>(objects->size()));
         for (int i = 0; i < n; ++i) {
             auto obj = (*objects)[i];
@@ -139,6 +118,9 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
                     filtered.push_back(obj);
                     break;
                 default:
+                    if (pb::stopsSimulation(obj, player) && ghostBox.intersectsRect(obj->getObjectRect())) {
+                        pb::g_simStopped = true;
+                    }
                     break;
             }
         }
@@ -155,9 +137,6 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
 
     void playerTouchedRing(PlayerObject* player, RingObject* ring) {
         if (pb::g_simulating) return;
-        if (auto pl = PlayLayer::get(); pl && static_cast<GJBaseGameLayer*>(pl) == this) {
-            pb::noteRingTouched(pl, player, ring);
-        }
         GJBaseGameLayer::playerTouchedRing(player, ring);
     }
 
@@ -173,28 +152,15 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
 
 class $modify(PBPlayerObject, PlayerObject) {
     void update(float dt) {
-        auto pl = PlayLayer::get();
-        if (!pb::g_simulating && pl) {
-            if (this == pl->m_player1) pb::onStep(pl, dt);
-            if (this == pl->m_player1 || this == pl->m_player2) pb::beforeRealUpdate(pl, this);
+        if (!pb::g_simulating) {
+            auto pl = PlayLayer::get();
+            if (pl && this == pl->m_player1) pb::onStep(pl, dt);
         }
-
-        // Ship / UFO / robot assist: keep only part of this step's change in
-        // vertical speed, so everything moves a little more gently. Ghosts get
-        // it too, so the buffer's predictions match.
-        float assist = pb::assistFor(pl, this);
-        double before = m_yVelocity;
-
         PlayerObject::update(dt);
-
-        if (assist > 0.f) {
-            m_yVelocity = before + (m_yVelocity - before) * (1.0 - assist);
-        }
     }
 
     void ringJump(RingObject* ring, bool skipCheck) {
         if (pb::g_simulating) return;
-        if (auto pl = PlayLayer::get()) pb::noteRingUsed(pl, this);
         PlayerObject::ringJump(ring, skipCheck);
     }
 
@@ -231,7 +197,7 @@ class $modify(HardStreak) {
 };
 
 // ---------------------------------------------------------------------------
-// Toggle keybind and live settings
+// Keybinds and live settings
 // ---------------------------------------------------------------------------
 
 $on_mod(Loaded) {
@@ -265,11 +231,7 @@ $on_mod(Loaded) {
         if (down && !repeat) pb::menu::toggle();
     });
 
-    pb::refreshCachedSettings();
-
     listenForAllSettingChanges([](std::string_view, std::shared_ptr<SettingV3>) {
-        pb::refreshCachedSettings();
-        if (auto overlay = pb::BufferOverlay::get(PlayLayer::get())) overlay->refresh();
         pb::menu::sync();
     });
 }

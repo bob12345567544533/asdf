@@ -47,45 +47,28 @@ const gp::Color COL_ACCENT(255, 0x7a, 0xde, 0x2d);
 const gp::Color COL_CLOSE_HOVER(255, 0xc4, 0x2b, 0x1c);
 
 constexpr int MAX_TICKS = 24;
-constexpr int TOGGLE_COUNT = 5;
+constexpr int TOGGLE_COUNT = 4;
 
-// Layout in logical pixels (scaled by DPI when drawn). Two columns:
-// sliders on the left, toggles and the log on the right.
+// Layout in logical pixels (scaled to the monitor when drawn). One column:
+// slider, toggles, log.
 constexpr float TITLE_H = 40.f;
 constexpr float PAD = 12.f;
 constexpr float GAP = 8.f;
 constexpr float COL_W = 330.f;
-constexpr float W = PAD + COL_W + GAP + COL_W + PAD;
+constexpr float W = PAD + COL_W + PAD;
 constexpr float LEFT_X = PAD;
-constexpr float RIGHT_X = PAD + COL_W + GAP;
+constexpr float RIGHT_X = PAD;
 
 enum class Unit { Ticks, Percent, Pixels, Slower };
 
-constexpr int SLIDER_COUNT = 9;
-constexpr int SLIDER_MAX[SLIDER_COUNT] { MAX_TICKS, 50, 50, 50, 12, 12, 50, 10, 50 };
-constexpr Unit SLIDER_UNIT[SLIDER_COUNT] {
-    Unit::Ticks, Unit::Percent, Unit::Percent, Unit::Percent,
-    Unit::Ticks, Unit::Ticks, Unit::Percent, Unit::Pixels, Unit::Slower
-};
-constexpr char const* SLIDER_KEYS[SLIDER_COUNT] {
-    "buffer-ticks", "ship-assist", "ufo-assist", "robot-assist",
-    "ledge-grace", "late-orbs", "hitbox-shrink", "wave-assist", "danger-slowmo"
-};
+constexpr int SLIDER_COUNT = 1;
+constexpr int SLIDER_MAX[SLIDER_COUNT] { MAX_TICKS };
+constexpr Unit SLIDER_UNIT[SLIDER_COUNT] { Unit::Ticks };
+constexpr char const* SLIDER_KEYS[SLIDER_COUNT] { "buffer-ticks" };
 constexpr wchar_t const* SLIDER_DESCS[SLIDER_COUNT] {
     L"Holds clicks that are a little too early and would kill you, then fires them on the step where they survive.",
-    L"Makes the ship floatier so each tap moves it less. This changes ship physics.",
-    L"Makes the UFO floatier: smaller hops and slower falling.",
-    L"Makes the robot floatier: lower jumps and slower falling.",
-    L"Lets you still jump for a few ticks after running off a block (cube, robot, ball, spider).",
-    L"Orbs still activate if you click a few ticks after passing them (yellow, pink, red, blue, green, black).",
-    L"Spikes that only graze the outer edge of your hitbox don't kill you.",
-    L"Nudges the wave up to this many pixels away from corners it's about to clip.",
-    L"Slows the game down right before you'd die. The music doesn't slow with it.",
 };
-constexpr wchar_t const* SLIDER_NAMES[SLIDER_COUNT] {
-    L"Buffer", L"Ship assist", L"UFO assist", L"Robot assist",
-    L"Ledge grace", L"Late orbs", L"Hitbox forgiveness", L"Wave assist", L"Danger slow-mo"
-};
+constexpr wchar_t const* SLIDER_NAMES[SLIDER_COUNT] { L"Buffer" };
 
 constexpr float SROW_H = 50.f;
 constexpr float SLIDER_CARD_Y = TITLE_H + GAP;
@@ -96,16 +79,16 @@ constexpr float sliderRowY(int i) { return SLIDER_CARD_Y + 5.f + i * SROW_H; }
 constexpr float sliderY(int i) { return sliderRowY(i) + 35.f; }
 
 constexpr float ROW_H = 38.f;
-constexpr float TOGGLE_CARD_Y = TITLE_H + GAP;
+constexpr float TOGGLE_CARD_Y = SLIDER_CARD_Y + SLIDER_CARD_H + GAP;
 constexpr float TOGGLE_CARD_H = ROW_H * TOGGLE_COUNT + 8.f;
 
 constexpr float LOG_LINE_H = 18.f;
 constexpr float LOG_CARD_Y = TOGGLE_CARD_Y + TOGGLE_CARD_H + GAP;
-constexpr float LOG_CARD_H = SLIDER_CARD_Y + SLIDER_CARD_H - LOG_CARD_Y; // ends level with the sliders
-constexpr size_t LOG_LINES = static_cast<size_t>((LOG_CARD_H - 42.f) / LOG_LINE_H);
+constexpr size_t LOG_LINES = 8;
+constexpr float LOG_CARD_H = 42.f + LOG_LINE_H * LOG_LINES;
 
 constexpr float FOOTER_H = 52.f;
-constexpr float H = SLIDER_CARD_Y + SLIDER_CARD_H + FOOTER_H;
+constexpr float H = LOG_CARD_Y + LOG_CARD_H + FOOTER_H;
 
 constexpr UINT WM_PB_SHOW = WM_APP + 1;
 constexpr UINT WM_PB_HIDE = WM_APP + 2;
@@ -121,8 +104,8 @@ constexpr DWORD EXCLUDE_FROM_CAPTURE = 0x00000011;
 // ---------------------------------------------------------------------------
 
 struct Values {
-    int sliders[SLIDER_COUNT] { 2, 15, 0, 0, 0, 0, 0, 0, 0 };
-    bool toggles[TOGGLE_COUNT] { true, true, false, true, false };
+    int sliders[SLIDER_COUNT] { 2 };
+    bool toggles[TOGGLE_COUNT] { true, true, false, true };
     bool hasPos = false;
     int x = 0;
     int y = 0;
@@ -130,17 +113,16 @@ struct Values {
 };
 
 constexpr char const* TOGGLE_KEYS[TOGGLE_COUNT] {
-    "enabled", "buffer-releases", "buffer-ship", "show-feedback", "show-stats"
+    "enabled", "buffer-releases", "buffer-ship", "show-feedback"
 };
 constexpr wchar_t const* TOGGLE_DESCS[TOGGLE_COUNT] {
-    L"Turns everything in the mod on or off. Same as the toggle key (F6).",
+    L"Turns the buffer on or off. Same as the toggle key (F6).",
     L"Also buffers early releases for wave, ship and robot, where letting go too early kills you.",
     L"Lets the buffer work in ship mode. Off by default since ship predictions are less reliable.",
     L"Shows in-game how early each buffered click was.",
-    L"Shows an in-game line with how many clicks got buffered this attempt and this session.",
 };
 constexpr wchar_t const* TOGGLE_NAMES[TOGGLE_COUNT] {
-    L"Enabled", L"Releases (wave, ship, robot)", L"Ship", L"Timing popup", L"Counter"
+    L"Enabled", L"Releases (wave, ship, robot)", L"Ship", L"Timing popup"
 };
 
 std::atomic<HWND> g_window = nullptr;
@@ -173,7 +155,6 @@ void writeSettings(Values const& v) {
     auto mod = Mod::get();
     for (int i = 0; i < SLIDER_COUNT; ++i) mod->setSettingValue<int64_t>(SLIDER_KEYS[i], v.sliders[i]);
     for (int i = 0; i < TOGGLE_COUNT; ++i) mod->setSettingValue<bool>(TOGGLE_KEYS[i], v.toggles[i]);
-    if (auto overlay = BufferOverlay::get(PlayLayer::get())) overlay->refresh();
 }
 
 void save() {
@@ -329,7 +310,7 @@ void paint(HWND wnd, HDC target) {
     g.DrawRectangle(&outline, 0.f, 0.f, W - 1.f, H - 1.f);
 
     // Title bar: name, minimize, close
-    text(g, L"Input Buffer", 15.f, COL_TEXT, { PAD + 4.f, 0.f, 200.f, TITLE_H }, gp::StringAlignmentNear, true);
+    text(g, L"Input Buffer Lite", 15.f, COL_TEXT, { PAD + 4.f, 0.f, 200.f, TITLE_H }, gp::StringAlignmentNear, true);
 
     auto mini = minimizeRect();
     if (g_hover == HIT_MINIMIZE) fillRound(g, COL_CARD_HOVER, mini, 4.f);
@@ -719,7 +700,7 @@ void windowThread() {
     cls.lpfnWndProc = windowProc;
     cls.hInstance = instance;
     cls.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512)); // IDC_ARROW
-    cls.lpszClassName = L"InputBufferWindow";
+    cls.lpszClassName = L"InputBufferLiteWindow";
     RegisterClassW(&cls);
 
     int pw = static_cast<int>(std::lround(W * g_scale));
@@ -727,7 +708,7 @@ void windowThread() {
 
     // A normal app window (own taskbar button) so it can live on another monitor.
     HWND wnd = CreateWindowExW(
-        WS_EX_APPWINDOW, cls.lpszClassName, L"Input Buffer", WS_POPUP | WS_MINIMIZEBOX | WS_SYSMENU,
+        WS_EX_APPWINDOW, cls.lpszClassName, L"Input Buffer Lite", WS_POPUP | WS_MINIMIZEBOX | WS_SYSMENU,
         CW_USEDEFAULT, CW_USEDEFAULT, pw, ph, nullptr, nullptr, instance, nullptr
     );
     if (!wnd) {

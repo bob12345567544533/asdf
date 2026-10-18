@@ -1,3 +1,3 @@
-# Input Buffer
+# Input Buffer Lite
 
 Input timing tweaks.
