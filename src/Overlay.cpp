@@ -24,16 +24,21 @@ BufferOverlay* BufferOverlay::get(PlayLayer* layer) {
 bool BufferOverlay::init() {
     if (!CCNode::init()) return false;
     this->setID(OVERLAY_ID);
-
-    m_feedback = CCLabelBMFont::create("", "bigFont.fnt");
-    m_feedback->setOpacity(0);
-    this->addChild(m_feedback);
-
-    m_stats = CCLabelBMFont::create("", "bigFont.fnt");
-    this->addChild(m_stats);
-
+    // Labels are created on demand with their real text (see setLabel), so the
+    // popup and the counter never depend on each other.
     this->refresh();
     return true;
+}
+
+// Replaces a label with a fresh one showing `text`.
+CCLabelBMFont* BufferOverlay::setLabel(CCLabelBMFont*& label, std::string const& text) {
+    if (label) {
+        label->removeFromParent();
+        label = nullptr;
+    }
+    label = CCLabelBMFont::create(text.c_str(), "bigFont.fnt");
+    this->addChild(label);
+    return label;
 }
 
 void BufferOverlay::layout() {
@@ -52,71 +57,66 @@ void BufferOverlay::layout() {
     float lineHeight = 32.f * scale;
     float dir = top ? -1.f : 1.f;
 
-    // The counter sits closest to the corner, the popup goes next to it.
-    for (auto label : { m_stats, m_feedback }) {
-        label->setScale(scale);
-        label->setAnchorPoint(anchor);
+    // The counter sits in the corner, the popup one row in from it.
+    if (m_stats) {
+        m_stats->setScale(scale);
+        m_stats->setAnchorPoint(anchor);
+        m_stats->setPosition({ x, y });
     }
-    // Fixed rows: the popup always sits one row in from the corner, whether the
-    // counter is on or not, so the counter can never hide or move it.
-    m_stats->setPosition({ x, y });
-    m_feedback->setPosition({ x, y + lineHeight * dir });
+    if (m_feedback) {
+        m_feedback->setScale(scale);
+        m_feedback->setAnchorPoint(anchor);
+        m_feedback->setPosition({ x, y + lineHeight * dir });
+    }
 }
 
 void BufferOverlay::refresh() {
     bool showStats = Mod::get()->getSettingValue<bool>("show-stats");
-    m_stats->setVisible(showStats);
-    if (showStats) {
+    if (!showStats) {
+        if (m_stats) {
+            m_stats->removeFromParent();
+            m_stats = nullptr;
+        }
+    }
+    else {
         auto const& s = g.stats;
         double avg = s.sessionCount > 0 ? s.sessionEarlyMs / s.sessionCount : 0.0;
         bool on = Mod::get()->getSettingValue<bool>("enabled");
         auto assist = Mod::get()->getSettingValue<int64_t>("ship-assist");
-        m_stats->setString(fmt::format(
+        auto label = this->setLabel(m_stats, fmt::format(
             "Buffer {} | attempt {} | session {} (avg {:.1f}ms){}",
             on ? "ON" : "OFF", s.attemptCount, s.sessionCount, avg,
             on && assist > 0 ? fmt::format(" | ship assist {}%", assist) : std::string()
-        ).c_str());
-        auto opacity = static_cast<GLubyte>(Mod::get()->getSettingValue<int64_t>("label-opacity"));
-        m_stats->setOpacity(opacity);
+        ));
+        label->setOpacity(static_cast<GLubyte>(Mod::get()->getSettingValue<int64_t>("label-opacity")));
     }
+    this->layout();
+}
+
+void BufferOverlay::popup(std::string const& text, ccColor3B color) {
+    auto label = this->setLabel(m_feedback, text);
+    label->setColor(color);
+    label->setOpacity(static_cast<GLubyte>(Mod::get()->getSettingValue<int64_t>("label-opacity")));
+    label->runAction(CCSequence::create(
+        CCDelayTime::create(1.0f),
+        CCFadeOut::create(0.4f),
+        nullptr
+    ));
     this->layout();
 }
 
 void BufferOverlay::showBuffered(double earlyMs, int ticks, Mode mode, bool release) {
     this->refresh();
     if (!Mod::get()->getSettingValue<bool>("show-feedback")) return;
-
-    m_feedback->setString(fmt::format(
+    this->popup(fmt::format(
         "{} {:.1f}ms early ({} tick{}, {})",
         release ? "Release" : "Click", earlyMs, ticks, ticks == 1 ? "" : "s", modeName(mode)
-    ).c_str());
-    m_feedback->setColor({ 120, 255, 140 });
-
-    auto opacity = static_cast<GLubyte>(Mod::get()->getSettingValue<int64_t>("label-opacity"));
-    m_feedback->stopAllActions();
-    m_feedback->setOpacity(opacity);
-    m_feedback->runAction(CCSequence::create(
-        CCDelayTime::create(1.0f),
-        CCFadeOut::create(0.4f),
-        nullptr
-    ));
-    this->layout();
+    ), { 120, 255, 140 });
 }
 
 void BufferOverlay::showToggle(bool enabled) {
     this->refresh();
-    m_feedback->setString(enabled ? "Buffer ON" : "Buffer OFF");
-    m_feedback->setColor(enabled ? ccColor3B { 120, 255, 140 } : ccColor3B { 255, 120, 120 });
-
-    auto opacity = static_cast<GLubyte>(Mod::get()->getSettingValue<int64_t>("label-opacity"));
-    m_feedback->stopAllActions();
-    m_feedback->setOpacity(opacity);
-    m_feedback->runAction(CCSequence::create(
-        CCDelayTime::create(1.0f),
-        CCFadeOut::create(0.4f),
-        nullptr
-    ));
-    this->layout();
+    this->popup(enabled ? "Buffer ON" : "Buffer OFF", enabled ? ccColor3B { 120, 255, 140 } : ccColor3B { 255, 120, 120 });
 }
 
 } // namespace pb

@@ -17,6 +17,8 @@ public:
 protected:
     bool init() override;
     void layout();
+    void popup(std::string const& text, cocos2d::ccColor3B color);
+    cocos2d::CCLabelBMFont* setLabel(cocos2d::CCLabelBMFont*& label, std::string const& text);
 
     cocos2d::CCLabelBMFont* m_feedback = nullptr;
     cocos2d::CCLabelBMFont* m_stats = nullptr;

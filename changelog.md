@@ -1,3 +1,6 @@
+# v2.6.1
+- **Fixed (for real this time):** the timing popup and the counter are now completely separate labels created with their real text, so the popup shows with the counter off.
+
 # v2.6.0
 - Wave assist goes up to 10 px (was 4).
 - The window sizes itself to the monitor it's on (1.33x on 1440p, 2x on 4K) and resizes when you drag it to another monitor. New Window Size setting on top of that.
