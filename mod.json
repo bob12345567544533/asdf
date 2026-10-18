@@ -8,7 +8,7 @@
 	},
 	"id": "ai.predictivebuffer",
 	"name": "Predictive Input Buffer",
-	"version": "v2.0.0",
+	"version": "v2.1.0",
 	"developer": "lilWC",
 	"description": "Holds early clicks for a few ms when they would kill you. Practice tool.",
 	"tags": ["gameplay", "cheat"],
@@ -29,6 +29,13 @@
 			"description": "Turns the buffer on or off while you're in a level.",
 			"default": "F6",
 			"category": "gameplay"
+		},
+		"menu-key": {
+			"type": "keybind",
+			"name": "Quick Settings Key",
+			"description": "Opens a small settings window. On Windows it's a separate window that's hidden from OBS / Discord capture. On other platforms it opens this settings page.",
+			"default": "F7",
+			"category": "universal"
 		},
 		"buffer-releases": {
 			"type": "bool",

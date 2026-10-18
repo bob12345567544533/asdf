@@ -37,6 +37,7 @@ While a simulation runs, hooks block everything that would touch the real level:
 - `src/Buffer.cpp` – simulation, the delay search and the input queue.
 - `src/Hooks.cpp` – all the hooks, plus the toggle keybind.
 - `src/Overlay.cpp` – the on-screen text.
+- `src/Menu.cpp` – the quick settings window (Win32 window with capture exclusion on Windows, Geode settings popup elsewhere).
 
 ## Known limits
 - Orbs, pads and portals aren't simulated. Near them the prediction can be wrong, so the mod is less useful there. It skips buffering entirely while you're touching an orb.

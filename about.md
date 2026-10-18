@@ -9,6 +9,7 @@ Every time you click, the mod quietly runs the next few hundred milliseconds of 
 - **Release buffering** for wave, ship and robot, where letting go too early kills you.
 - **Timing feedback**: shows how early each saved click was, so you can learn the timing instead of relying on the buffer.
 - **Toggle key** (F6 by default) to turn it on/off in a level.
+- **Quick settings window** (F7 by default). On Windows it's hidden from OBS / Discord capture.
 - Works with **dual mode** and **2-player mode** (each player is handled on its own).
 - Uses real time, so it stays consistent if you change TPS or a level uses time warp.
 

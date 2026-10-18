@@ -1,4 +1,5 @@
 #include "Buffer.hpp"
+#include "Menu.hpp"
 #include "Overlay.hpp"
 
 #include <Geode/modify/EffectGameObject.hpp>
@@ -220,6 +221,10 @@ $on_mod(Loaded) {
                 enabled ? NotificationIcon::Success : NotificationIcon::Info
             )->show();
         }
+    });
+
+    listenForKeybindSettingPresses("menu-key", [](Keybind const&, bool down, bool repeat, double) {
+        if (down && !repeat) pb::menu::toggle();
     });
 
     listenForAllSettingChanges([](std::string_view, std::shared_ptr<SettingV3>) {

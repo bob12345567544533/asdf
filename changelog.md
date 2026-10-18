@@ -1,3 +1,7 @@
+# v2.1.0
+- **New:** Quick Settings key (F7 by default). Opens a small settings window without going through Geode. On Windows it's a separate window hidden from OBS / Discord capture. On other platforms it opens the normal settings page.
+- Preset buttons in that window set every mode (except ship) to the old 2 / 4 / 8 / 16 tick stages.
+
 # v2.0.0
 Full rewrite.
 
