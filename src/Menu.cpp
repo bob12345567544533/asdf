@@ -59,16 +59,17 @@ constexpr float W = PAD + COL_W + PAD;
 constexpr float LEFT_X = PAD;
 constexpr float RIGHT_X = PAD;
 
-enum class Unit { Ticks, Percent, Pixels, Slower };
+enum class Unit { Ticks, Percent, Pixels, Slower, Random };
 
-constexpr int SLIDER_COUNT = 1;
-constexpr int SLIDER_MAX[SLIDER_COUNT] { MAX_TICKS };
-constexpr Unit SLIDER_UNIT[SLIDER_COUNT] { Unit::Ticks };
-constexpr char const* SLIDER_KEYS[SLIDER_COUNT] { "buffer-ticks" };
+constexpr int SLIDER_COUNT = 2;
+constexpr int SLIDER_MAX[SLIDER_COUNT] { MAX_TICKS, MAX_TICKS };
+constexpr Unit SLIDER_UNIT[SLIDER_COUNT] { Unit::Ticks, Unit::Random };
+constexpr char const* SLIDER_KEYS[SLIDER_COUNT] { "buffer-ticks", "randomize" };
 constexpr wchar_t const* SLIDER_DESCS[SLIDER_COUNT] {
     L"Holds early clicks that would kill you and fires them later, only using delays inside this range. Drag either handle.",
+    L"Off = always the smallest safe delay (+1 tick margin). Above 0 = a random safe delay up to this many ticks above the smallest one.",
 };
-constexpr wchar_t const* SLIDER_NAMES[SLIDER_COUNT] { L"Buffer" };
+constexpr wchar_t const* SLIDER_NAMES[SLIDER_COUNT] { L"Buffer", L"Randomize" };
 
 constexpr float SROW_H = 50.f;
 constexpr float SLIDER_CARD_Y = TITLE_H + GAP;
@@ -104,7 +105,7 @@ constexpr DWORD EXCLUDE_FROM_CAPTURE = 0x00000011;
 // ---------------------------------------------------------------------------
 
 struct Values {
-    int sliders[SLIDER_COUNT] { 2 }; // buffer: max ticks
+    int sliders[SLIDER_COUNT] { 2, 0 }; // buffer max ticks, randomize ticks
     int minTicks = 1;                // buffer: min ticks (left handle)
     bool toggles[TOGGLE_COUNT] { true, true, false, true };
     bool hasPos = false;
@@ -204,6 +205,7 @@ std::wstring valueLabel(int slider, int value) {
         case Unit::Percent: std::swprintf(buf, 48, L"%d%%", value); break;
         case Unit::Pixels: std::swprintf(buf, 48, L"%d px", value); break;
         case Unit::Slower: std::swprintf(buf, 48, L"%d%% slower", value); break;
+        case Unit::Random: std::swprintf(buf, 48, L"up to +%d tick%ls", value, value == 1 ? L"" : L"s"); break;
     }
     return buf;
 }
