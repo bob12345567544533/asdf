@@ -8,7 +8,7 @@
 	},
 	"id": "lilwc.input-buffer-lite",
 	"name": "Input Buffer Lite",
-	"version": "v1.2.0",
+	"version": "v1.3.0",
 	"developer": "lilWC",
 	"description": "Input timing tweaks.",
 	"tags": ["gameplay"],
@@ -33,6 +33,15 @@
 			"description": "Smallest delay the buffer will use. With Min 1 and Ticks 4 it only delays by 1 to 4 ticks.",
 			"default": 1,
 			"min": 1,
+			"max": 24,
+			"control": { "arrow-step": 1, "slider-step": 1 }
+		},
+		"randomize": {
+			"type": "int",
+			"name": "Randomize (ticks)",
+			"description": "0 = always use the smallest safe delay (plus 1 tick margin). Above 0 = pick a random safe delay up to this many ticks above the smallest one.",
+			"default": 0,
+			"min": 0,
 			"max": 24,
 			"control": { "arrow-step": 1, "slider-step": 1 }
 		},

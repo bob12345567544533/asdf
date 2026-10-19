@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <random>
+#include <vector>
 
 // Shared random number generator, seeded once per game session.
 [[maybe_unused]] static std::mt19937& bufRng() {
@@ -423,46 +424,92 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
         return !r.died || r.steps - base.steps >= minGain;
     };
 
-    // Find the smallest delay that clearly survives longer.
-    for (int delay = minDelay; delay <= limit && budget > 0; ++delay) {
-        auto result = simulate(s, delay, budget);
-        if (!survives(result)) continue;
+    // --- delay search ---
+    // 0 = old deterministic behavior. >0 = randomly pick a safe delay within
+    // this many ticks above the smallest one.
+    int slider = Mod::get()->getSettingValue<int>("randomize");
 
-        // The first working delay sits right at the edge where a hair earlier
-        // still dies. If one more step also works, use that for some margin.
-        int chosen = delay;
-        if (delay + 1 <= limit && budget > 0 && survives(simulate(s, delay + 1, budget))) {
-            chosen = delay + 1;
+    // `budget` is by-reference and drains across calls, exactly like the old
+    // loop. Guard on it and keep the same call order so the budget state ends
+    // up where the old code left it. Named `simAt` because the outer `survives`
+    // already exists and a lambda named `survives` would shadow it.
+    auto simAt = [&](int delaySteps, SimResult& out) -> bool {
+        if (budget <= 0) return false;
+        out = simulate(s, delaySteps, budget);
+        return survives(out);
+    };
+
+    // Ascending scan, collecting every safe delay. `safe` stays sorted and
+    // starts at `first`, so the old "+1 margin" pick is just safe[1].
+    std::vector<int> safe;
+    std::vector<SimResult> safeResults; // parallel to `safe`, avoids re-simulating
+    int first = -1;
+
+    for (int d = minDelay; d <= limit && budget > 0; ++d) {
+        SimResult r;
+        bool ok = simAt(d, r);
+
+        if (ok) {
+            if (first < 0) first = d;
+            safe.push_back(d);
+            safeResults.push_back(r);
         }
 
-        ch.shift = chosen;
-        ch.queue.push_back({ down, isPlayer1, g.tick + 1 + chosen });
+        if (first >= 0) {
+            // Stop as soon as the window we care about is covered: one step for
+            // the deterministic pick, `slider` steps for the randomized one.
+            int reach = (slider > 0) ? (first + slider) : (first + 1);
+            if (d >= reach) break;
+        }
+    }
 
-        double earlyMs = chosen * perTick;
+    if (first < 0) {
+        // nothing works -> pass the input through, exactly like before
         if (debug) {
             log::info(
-                "{} buffered by {} steps ({:.2f}ms, {}): dies after {} steps now, {} after delay",
-                down ? "Press" : "Release", chosen, earlyMs, modeName(mainMode), base.steps,
-                result.died ? fmt::format("{}", result.steps) : std::string(result.stopped ? "reaches a portal/pad/orb" : "survives")
+                "{} would die after {} steps and no delay up to {} steps helps",
+                down ? "Press" : "Release", base.steps, limit
             );
         }
-        if (auto overlay = BufferOverlay::get(layer)) {
-            overlay->showBuffered(earlyMs, chosen, mainMode, !down);
-        }
-        menu::log(fmt::format(
-            "+{} tick{} ({:.1f} ms)  {} {}",
-            chosen, chosen == 1 ? "" : "s", earlyMs, modeName(mainMode), down ? "press" : "release"
-        ), static_cast<int>(layer->getCurrentPercent()));
-        return true;
+        return false;
     }
 
+    // old deterministic pick: smallest safe delay + 1 step of margin
+    auto oldPick = [&]() -> int {
+        if (first + 1 <= limit && safe.size() >= 2 && safe[1] == first + 1) return first + 1;
+        return first;
+    };
+
+    int chosen;
+    if (slider <= 0 || safe.size() <= 1) {
+        chosen = oldPick();
+    } else {
+        std::uniform_int_distribution<size_t> dist(0, safe.size() - 1);
+        chosen = safe[dist(bufRng())];
+    }
+
+    SimResult const& result =
+        safeResults[static_cast<size_t>(std::find(safe.begin(), safe.end(), chosen) - safe.begin())];
+
+    ch.shift = chosen;
+    ch.queue.push_back({ down, isPlayer1, g.tick + 1 + chosen });
+
+    double earlyMs = chosen * perTick;
     if (debug) {
         log::info(
-            "{} would die after {} steps and no delay up to {} steps helps",
-            down ? "Press" : "Release", base.steps, limit
+            "{} buffered by {} steps ({:.2f}ms, {}): dies after {} steps now, {} after delay",
+            down ? "Press" : "Release", chosen, earlyMs, modeName(mainMode), base.steps,
+            result.died ? fmt::format("{}", result.steps) : std::string(result.stopped ? "reaches a portal/pad/orb" : "survives")
         );
     }
-    return false;
+    if (auto overlay = BufferOverlay::get(layer)) {
+        overlay->showBuffered(earlyMs, chosen, mainMode, !down);
+    }
+    menu::log(fmt::format(
+        "+{} tick{} ({:.1f} ms)  {} {}",
+        chosen, chosen == 1 ? "" : "s", earlyMs, modeName(mainMode), down ? "press" : "release"
+    ), static_cast<int>(layer->getCurrentPercent()));
+    return true;
 }
 
 } // namespace pb

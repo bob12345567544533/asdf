@@ -1,3 +1,6 @@
+# v1.3.0
+- New Randomize (ticks) setting: above 0, the buffer picks a random safe delay up to that many ticks above the smallest one instead of always the same one.
+
 # v1.2.0
 - The log shows the level % each buffered click happened at, in red.
 - The log groups events by attempt with an "Attempt N" divider.
