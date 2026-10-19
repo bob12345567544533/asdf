@@ -46,7 +46,7 @@ class $modify(PBPlayLayer, PlayLayer) {
         if (auto overlay = pb::BufferOverlay::create()) {
             this->addChild(overlay, 10000);
         }
-        pb::menu::attempt(m_attempts);
+        pb::menu::attempt(m_attempts, true);
         return true;
     }
 
@@ -71,7 +71,10 @@ class $modify(PBPlayLayer, PlayLayer) {
         }
         PlayLayer::destroyPlayer(player, object);
         // Only drop held inputs if you actually died (noclip keeps you alive).
-        if (player && player->m_isDead) pb::clearQueues();
+        if (player && player->m_isDead) {
+            pb::clearQueues();
+            pb::menu::death(static_cast<int>(this->getCurrentPercent()));
+        }
     }
 
     void playEndAnimationToPos(CCPoint pos) {
@@ -241,4 +244,5 @@ $on_mod(Loaded) {
 // Open the window when the game starts, like the old console did.
 $on_game(Loaded) {
     if (Mod::get()->getSettingValue<bool>("open-window")) pb::menu::open();
+    else pb::menu::prepare();
 }

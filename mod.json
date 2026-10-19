@@ -8,7 +8,7 @@
 	},
 	"id": "lilwc.input-buffer-lite",
 	"name": "Input Buffer Lite",
-	"version": "v1.3.1",
+	"version": "v1.4.0",
 	"developer": "lilWC",
 	"description": "Input timing tweaks.",
 	"tags": ["gameplay"],
@@ -81,6 +81,13 @@
 			"min": 50,
 			"max": 200,
 			"control": { "arrow-step": 5, "slider-step": 5 }
+		},
+		"theme": {
+			"type": "string",
+			"name": "Window Theme",
+			"description": "Look of the F7 window. You can also switch it from the button in the window's title bar.",
+			"default": "Clean",
+			"one-of": ["Clean", "Terminal", "Compact HUD", "Neon", "Retro GD", "Two-pane", "Analytics", "Big Numbers", "Slate", "Minimal"]
 		},
 		"display-title": {
 			"type": "title",

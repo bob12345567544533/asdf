@@ -507,11 +507,7 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
     if (auto overlay = BufferOverlay::get(layer)) {
         overlay->showBuffered(earlyMs, chosen, mainMode, !down, randomPick);
     }
-    menu::log(fmt::format(
-        "+{} tick{} ({:.1f} ms) {} {}{}",
-        chosen, chosen == 1 ? "" : "s", earlyMs, modeName(mainMode), down ? "press" : "release",
-        randomPick ? " (random)" : ""
-    ), static_cast<int>(layer->getCurrentPercent()));
+    menu::saved(chosen, earlyMs, static_cast<int>(mainMode), !down, randomPick, static_cast<int>(layer->getCurrentPercent()));
     return true;
 }
 
