@@ -6,6 +6,7 @@
 #include <cmath>
 #include <random>
 #include <vector>
+#include <sstream>
 
 // Shared random number generator, seeded once per game session.
 [[maybe_unused]] static std::mt19937& bufRng() {
@@ -221,6 +222,33 @@ struct SimSetup {
 // jumps, clicks, attempts and the level's checksum over them. If they change
 // behind GD's back, GD shows "New Best" but throws the PB away when you leave
 // the level. Snapshot everything before the ghosts run and put it back after.
+// Diagnostic: byte-level diff of an object before/after the ghost runs, as
+// "0x36cc 0x3a10-0x3a17 ..." (offsets into the object).
+struct RawSnapshot {
+    uint8_t const* base = nullptr;
+    std::vector<uint8_t> bytes;
+    void take(void const* object, size_t size) {
+        base = static_cast<uint8_t const*>(object);
+        bytes.assign(base, base + size);
+    }
+    std::string diff(size_t maxRanges) const {
+        std::string out;
+        size_t ranges = 0;
+        size_t i = 0;
+        while (i < bytes.size() && ranges < maxRanges) {
+            if (base[i] == bytes[i]) { ++i; continue; }
+            size_t start = i;
+            while (i < bytes.size() && (base[i] != bytes[i] || (i + 1 < bytes.size() && base[i + 1] != bytes[i + 1]))) ++i;
+            if (!out.empty()) out += ' ';
+            out += i - 1 > start ? fmt::format("{:x}-{:x}", start, i - 1) : fmt::format("{:x}", start);
+            ++ranges;
+        }
+        return out;
+    }
+};
+
+int g_diffReports = 0; // first few clicks only
+
 struct StatsGuard {
     PlayLayer* layer;
     GJGameLevel* level;
@@ -268,7 +296,14 @@ struct StatsGuard {
     decltype(PlayLayer::m_isTestMode) s_m_isTestMode {};
     decltype(PlayLayer::m_isPracticeMode) s_m_isPracticeMode {};
 
+    RawSnapshot rawLayer;
+    RawSnapshot rawLevel;
+
     explicit StatsGuard(PlayLayer* l) : layer(l), level(l ? l->m_level : nullptr) {
+        if (g_diffReports < 6) {
+            rawLayer.take(layer, sizeof(PlayLayer));
+            if (level) rawLevel.take(level, sizeof(GJGameLevel));
+        }
         jumps = layer->m_jumps;
         uncommittedJumps = layer->m_uncommittedJumps;
         hasJumped = layer->m_hasJumped;
@@ -315,6 +350,21 @@ struct StatsGuard {
     }
 
     ~StatsGuard() {
+        if (g_diffReports < 6 && rawLayer.base) {
+            ++g_diffReports;
+            auto pl = rawLayer.diff(12);
+            auto lv = rawLevel.base ? rawLevel.diff(8) : std::string();
+            log::info("[PB diag] PlayLayer changed: {} | Level changed: {}", pl, lv);
+            // Split into window-sized lines.
+            std::string line = "PL:";
+            std::istringstream words(pl.empty() ? std::string("none") : pl);
+            for (std::string w; words >> w;) {
+                if (line.size() + w.size() > 40) { menu::log(line); line = "PL:"; }
+                line += " " + w;
+            }
+            menu::log(line);
+            menu::log("LV: " + (lv.empty() ? std::string("none") : lv));
+        }
         static bool reported = false;
         if (!reported) {
             bool changed = layer->m_jumps != jumps || layer->m_uncommittedJumps != uncommittedJumps
