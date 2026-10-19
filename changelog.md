@@ -1,3 +1,6 @@
+# v1.4.3
+- Fixed PBs being thrown away when leaving the level: ghost runs could change the jump and click counters GD checks before saving progress. They are now restored after every ghost run.
+
 # v1.4.1
 - Fixed PBs not saving: the death hook runs in its normal order again (v1.4.0 forced it to run before other mods').
 

@@ -217,6 +217,75 @@ struct SimSetup {
     int decideAfter = -1;
 };
 
+// Ghost runs must not change anything GD counts for its progress check:
+// jumps, clicks, attempts and the level's checksum over them. If they change
+// behind GD's back, GD shows "New Best" but throws the PB away when you leave
+// the level. Snapshot everything before the ghosts run and put it back after.
+struct StatsGuard {
+    PlayLayer* layer;
+    GJGameLevel* level;
+    int jumps;
+    int uncommittedJumps;
+    bool hasJumped;
+    int clicks;
+    int attempts;
+    bool jumping;
+    geode::SeedValueRSV levelAttempts;
+    geode::SeedValueRSV levelJumps;
+    geode::SeedValueRSV levelClicks;
+    geode::SeedValueRSV levelAttemptTime;
+    int chk = 0;
+    bool chkValid = false;
+    bool legit = false;
+
+    explicit StatsGuard(PlayLayer* l) : layer(l), level(l ? l->m_level : nullptr) {
+        jumps = layer->m_jumps;
+        uncommittedJumps = layer->m_uncommittedJumps;
+        hasJumped = layer->m_hasJumped;
+        clicks = layer->m_clicks;
+        attempts = layer->m_attempts;
+        jumping = layer->m_jumping;
+        if (level) {
+            levelAttempts = level->m_attempts;
+            levelJumps = level->m_jumps;
+            levelClicks = level->m_clicks;
+            levelAttemptTime = level->m_attemptTime;
+            chk = level->m_chk;
+            chkValid = level->m_isChkValid;
+            legit = level->m_isCompletionLegitimate;
+        }
+    }
+
+    ~StatsGuard() {
+        static bool reported = false;
+        if (!reported) {
+            bool changed = layer->m_jumps != jumps || layer->m_uncommittedJumps != uncommittedJumps
+                || layer->m_clicks != clicks || layer->m_attempts != attempts
+                || (level && (level->m_jumps.value() != levelJumps.value() || level->m_clicks.value() != levelClicks.value()
+                    || level->m_attempts.value() != levelAttempts.value() || level->m_chk != chk));
+            if (changed) {
+                reported = true;
+                menu::log("caught ghosts changing PB counters (fixed)");
+            }
+        }
+        layer->m_jumps = jumps;
+        layer->m_uncommittedJumps = uncommittedJumps;
+        layer->m_hasJumped = hasJumped;
+        layer->m_clicks = clicks;
+        layer->m_attempts = attempts;
+        layer->m_jumping = jumping;
+        if (level) {
+            level->m_attempts = levelAttempts;
+            level->m_jumps = levelJumps;
+            level->m_clicks = levelClicks;
+            level->m_attemptTime = levelAttemptTime;
+            level->m_chk = chk;
+            level->m_isChkValid = chkValid;
+            level->m_isCompletionLegitimate = legit;
+        }
+    }
+};
+
 void setHeld(PlayerObject* ghost, int index, bool held) {
     if (held) ghost->pushButton(PlayerButton::Jump);
     else ghost->releaseButton(PlayerButton::Jump);
@@ -457,6 +526,7 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
 
     // Would this input kill you if it went through right now? If the ghost
     // survives, or reaches a portal/pad/orb first, let it through untouched.
+    StatsGuard stats(layer); // restores GD's counters when onButton returns
     auto base = simulate(s, 0, budget);
     if (!base.died) return false;
 
