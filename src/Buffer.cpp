@@ -347,7 +347,7 @@ SimResult simulate(SimSetup const& s, int delay, int& budget) {
             ghosts[i]->m_collisionLogBottom->removeAllObjects();
             ghosts[i]->m_collisionLogLeft->removeAllObjects();
             ghosts[i]->m_collisionLogRight->removeAllObjects();
-            if (g_testMode != 'D') s.layer->checkCollisions(ghosts[i], s.dt, false);
+            s.layer->checkCollisions(ghosts[i], s.dt, false);
             if (g_simDied) return { true, false, step };
             if (g_simStopped) return { false, true, step };
         }
@@ -448,19 +448,6 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
     }
 
     if (layer->m_levelEndAnimationStarted) return false;
-
-    // PB bug hunt. A: no prediction at all. C: fixed 2-tick delay on presses, no prediction.
-    auto testMode = Mod::get()->getSettingValue<std::string>("pb-test");
-    g_testMode = testMode.empty() ? 'N' : testMode[0];
-    if (g_testMode == 'D' || g_testMode == 'E' || g_testMode == 'G') testMode = "B"; // sim variants, never delay
-    if (testMode == "A") return false;
-    if (testMode == "C") {
-        if (!down) return false;
-        ch.shift = 2;
-        ch.queue.push_back({ down, isPlayer1, g.tick + 1 + 2 });
-        menu::saved(2, 2 * (1000.0 / 240.0), 0, false, false, levelPercent(layer));
-        return true;
-    }
 
     // Which players does this input move?
     auto p1 = layer->m_player1;
@@ -624,11 +611,6 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
 
     SimResult const& result =
         safeResults[static_cast<size_t>(std::find(safe.begin(), safe.end(), chosen) - safe.begin())];
-
-    if (testMode == "B") {
-        menu::log(fmt::format("B: would delay +{}", chosen));
-        return false;
-    }
 
     ch.shift = chosen;
     ch.queue.push_back({ down, isPlayer1, g.tick + 1 + chosen });

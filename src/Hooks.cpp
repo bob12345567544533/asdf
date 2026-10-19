@@ -169,11 +169,8 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
             CCRect box = obj->getObjectRect();
             if (!me.intersectsRect(box)) continue;
             float half = me.size.height / 2.f;
-            float vy = player->m_yVelocity * (flipped ? -1.f : 1.f); // >0 = moving away from "ground"
             bool fromAbove = prevY - half >= box.getMaxY() - 2.f;
             bool fromBelow = prevY + half <= box.getMinY() + 2.f;
-            bool movingDown = flipped ? player->m_yVelocity >= 0.f : player->m_yVelocity <= 0.f;
-            (void)vy;
             if (fromAbove && (flipped ? ridesCeiling : true) && player->m_yVelocity <= 0.f) {
                 player->setPosition({ player->getPositionX(), box.getMaxY() + half });
                 player->m_yVelocity = 0.f;
@@ -185,7 +182,6 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
                 if (flipped) player->m_isOnGround = true;
             }
             else {
-                (void)movingDown;
                 pb::g_simDied = true;
                 return;
             }

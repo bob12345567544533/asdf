@@ -1,3 +1,8 @@
+# v1.6.0
+- Fixed PBs not saving with the buffer on. The hidden prediction runs no longer go through GD's collision code for blocks and spikes (which made GD drop the PB); they use their own math instead.
+- Near slopes the buffer now lets inputs through instead of predicting.
+- Removed the PB test switch and debug log lines.
+
 # v1.4.9
 - Fixed PBs not saving: during ghost runs the death hook swallowed GD's anti-cheat call for the real player. Now only ghost deaths are caught, like the original mod.
 
