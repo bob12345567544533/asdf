@@ -1,3 +1,7 @@
+# v1.3.1
+- Log and timing popup mark delays picked by Randomize with "(random)".
+- Wider window so log lines no longer get cut off with "...".
+
 # v1.3.0
 - New Randomize setting and slider in the F7 window: above 0, the buffer picks a random safe delay up to that many ticks above the smallest one instead of always the same one.
 

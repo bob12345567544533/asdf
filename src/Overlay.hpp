@@ -10,7 +10,7 @@ public:
     static BufferOverlay* create();
     static BufferOverlay* get(PlayLayer* layer);
 
-    void showBuffered(double earlyMs, int ticks, Mode mode, bool release);
+    void showBuffered(double earlyMs, int ticks, Mode mode, bool release, bool random = false);
     void showToggle(bool enabled);
 
 protected:

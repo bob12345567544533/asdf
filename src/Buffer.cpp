@@ -481,11 +481,13 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
     };
 
     int chosen;
+    bool randomPick = false; // true when Randomize chose the delay
     if (slider <= 0 || safe.size() <= 1) {
         chosen = oldPick();
     } else {
         std::uniform_int_distribution<size_t> dist(0, safe.size() - 1);
         chosen = safe[dist(bufRng())];
+        randomPick = true;
     }
 
     SimResult const& result =
@@ -503,11 +505,12 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
         );
     }
     if (auto overlay = BufferOverlay::get(layer)) {
-        overlay->showBuffered(earlyMs, chosen, mainMode, !down);
+        overlay->showBuffered(earlyMs, chosen, mainMode, !down, randomPick);
     }
     menu::log(fmt::format(
-        "+{} tick{} ({:.1f} ms)  {} {}",
-        chosen, chosen == 1 ? "" : "s", earlyMs, modeName(mainMode), down ? "press" : "release"
+        "+{} tick{} ({:.1f} ms) {} {}{}",
+        chosen, chosen == 1 ? "" : "s", earlyMs, modeName(mainMode), down ? "press" : "release",
+        randomPick ? " (random)" : ""
     ), static_cast<int>(layer->getCurrentPercent()));
     return true;
 }

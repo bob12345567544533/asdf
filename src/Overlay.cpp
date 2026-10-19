@@ -56,11 +56,12 @@ void BufferOverlay::popup(std::string const& text, ccColor3B color) {
     ));
 }
 
-void BufferOverlay::showBuffered(double earlyMs, int ticks, Mode mode, bool release) {
+void BufferOverlay::showBuffered(double earlyMs, int ticks, Mode mode, bool release, bool random) {
     if (!Mod::get()->getSettingValue<bool>("show-feedback")) return;
     this->popup(fmt::format(
-        "{} {:.1f}ms early ({} tick{}, {})",
-        release ? "Release" : "Click", earlyMs, ticks, ticks == 1 ? "" : "s", modeName(mode)
+        "{} {:.1f}ms early ({} tick{}, {}{})",
+        release ? "Release" : "Click", earlyMs, ticks, ticks == 1 ? "" : "s", modeName(mode),
+        random ? ", random" : ""
     ), { 120, 255, 140 });
 }
 
