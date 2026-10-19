@@ -402,7 +402,7 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
     // PB bug hunt. A: no prediction at all. C: fixed 2-tick delay on presses, no prediction.
     auto testMode = Mod::get()->getSettingValue<std::string>("pb-test");
     g_testMode = testMode.empty() ? 'N' : testMode[0];
-    if (g_testMode == 'D' || g_testMode == 'E') testMode = "B"; // sim variants, never delay
+    if (g_testMode == 'D' || g_testMode == 'E' || g_testMode == 'G') testMode = "B"; // sim variants, never delay
     if (testMode == "A") return false;
     if (testMode == "C") {
         if (!down) return false;

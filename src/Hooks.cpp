@@ -114,23 +114,28 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
         auto& filtered = depth == 0 ? shared : local;
         filtered.clear();
         std::vector<GameObject*> stops;
+        std::vector<GameObject*> hazards;
 
         int n = std::min<int>(count, static_cast<int>(objects->size()));
         for (int i = 0; i < n; ++i) {
             auto obj = (*objects)[i];
             if (!obj) continue;
             switch (obj->m_objectType) {
-                case GameObjectType::Solid:
                 case GameObjectType::Hazard:
                 case GameObjectType::AnimatedHazard:
+                    // Never hand spikes to GD for a ghost: GD's hazard handling
+                    // remembers the touch, and a ghost that "touched a spike and
+                    // lived" makes GD throw away the PB. Checked by hand below.
+                    if (pb::g_testMode == 'G') filtered.push_back(obj);
+                    else if (!obj->m_isGroupDisabled) hazards.push_back(obj);
+                    break;
+                case GameObjectType::Solid:
                 case GameObjectType::Slope:
-                case GameObjectType::CollisionObject: // same set the original mod used
-                    filtered.push_back(obj);
+                case GameObjectType::CollisionObject:
+                    if (pb::g_testMode != 'G') filtered.push_back(obj);
                     break;
                 default:
-                    // Checked after GD's own pass below, from cached hitboxes only.
-                    // Asking GD for an ignored object's hitbox here (the original
-                    // mod never does) is what stopped PBs from saving.
+                    // Portals/pads/orbs: checked after GD's pass, from cached hitboxes.
                     if (pb::stopsSimulation(obj, player)) stops.push_back(obj);
                     break;
             }
@@ -141,7 +146,26 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
         GJBaseGameLayer::collisionCheckObjects(player, &filtered, static_cast<int>(filtered.size()), dt);
         depth--;
 
-        CCRect const& ghostBox = player->m_objectRect;
+        CCRect ghostBox = player->getObjectRect();
+        for (auto obj : hazards) {
+            CCRect box = obj->getObjectRect();
+            bool hit;
+            if (obj->m_objectRadius > 0.f) {
+                // Round hitbox (saws): closest point of the ghost's box to the center.
+                float cx = box.getMidX(), cy = box.getMidY();
+                float px = std::clamp(cx, ghostBox.getMinX(), ghostBox.getMaxX());
+                float py = std::clamp(cy, ghostBox.getMinY(), ghostBox.getMaxY());
+                float r = obj->m_objectRadius;
+                hit = (px - cx) * (px - cx) + (py - cy) * (py - cy) <= r * r;
+            }
+            else {
+                hit = ghostBox.intersectsRect(box);
+            }
+            if (hit) {
+                pb::g_simDied = true;
+                return;
+            }
+        }
         for (auto obj : stops) {
             if (ghostBox.intersectsRect(obj->m_objectRect)) {
                 pb::g_simStopped = true;
