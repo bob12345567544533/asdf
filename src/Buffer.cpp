@@ -4,6 +4,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <random>
+
+// Shared random number generator, seeded once per game session.
+[[maybe_unused]] static std::mt19937& bufRng() {
+    static std::mt19937 g{ std::random_device{}() };
+    return g;
+}
 
 using namespace geode::prelude;
 
