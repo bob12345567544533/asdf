@@ -232,12 +232,32 @@ int levelPercent(PlayLayer* layer) {
 // sticks GD shows "New Best" but won't save it. Copy the layer's memory before
 // the ghosts run and put back every value they changed. Pointers are left
 // alone (lists GD grew or moved), only plain values are restored.
+struct Watch {
+    char const* name;
+    uint64_t* base = nullptr;
+    std::vector<uint64_t> saved;
+    void take(void* object, size_t size) {
+        if (!object) return;
+        base = static_cast<uint64_t*>(object);
+        saved.assign(base, base + size / 8);
+    }
+};
+
 struct LayerRestore {
     PlayLayer* layer;
     std::vector<uint64_t> saved;
+    std::array<Watch, 5> watches { Watch{"P1"}, Watch{"LV"}, Watch{"GM"}, Watch{"GS"}, Watch{"P2"} };
+    static inline int reports = 0;
     explicit LayerRestore(PlayLayer* l) : layer(l) {
         auto words = reinterpret_cast<uint64_t const*>(layer);
         saved.assign(words, words + sizeof(PlayLayer) / 8);
+        if (reports < 3) {
+            watches[0].take(layer->m_player1, sizeof(PlayerObject));
+            watches[1].take(layer->m_level, sizeof(GJGameLevel));
+            watches[2].take(GameManager::get(), sizeof(GameManager));
+            watches[3].take(GameStatsManager::get(), sizeof(GameStatsManager));
+            watches[4].take(layer->m_player2, sizeof(PlayerObject));
+        }
     }
     static bool looksLikePointer(uint64_t v) {
         return v >= 0x10000 && v <= 0x7fffffffffffull;
@@ -245,19 +265,35 @@ struct LayerRestore {
     ~LayerRestore() {
         auto words = reinterpret_cast<uint64_t*>(layer);
         int restored = 0;
-        std::string where;
+        std::string where, ptrs;
+        int ptrCount = 0;
         for (size_t i = 0; i < saved.size(); ++i) {
             uint64_t now = words[i];
             uint64_t was = saved[i];
             if (now == was) continue;
-            if (looksLikePointer(now) && looksLikePointer(was)) continue;
+            if (looksLikePointer(now) && looksLikePointer(was)) {
+                if (ptrCount++ < 6) ptrs += fmt::format(" {:x}", i * 8);
+                continue;
+            }
             words[i] = was;
             if (restored++ < 6) where += fmt::format(" {:x}", i * 8);
         }
-        static bool reported = false;
-        if (restored && !reported) {
-            reported = true;
-            menu::log(fmt::format("ghost fix: undid {} at{}", restored, where));
+        if (reports < 3 && (restored || ptrCount || true)) {
+            std::string other;
+            for (auto& w : watches) {
+                if (!w.base) continue;
+                int n = 0;
+                std::string at;
+                for (size_t i = 0; i < w.saved.size(); ++i) {
+                    if (w.base[i] != w.saved[i] && n++ < 5) at += fmt::format(" {:x}", i * 8);
+                }
+                if (n) other += fmt::format(" {}:{}{}", w.name, n, at);
+            }
+            if (restored || ptrCount || !other.empty()) {
+                reports++;
+                menu::log(fmt::format("fix {}:{} ptr {}:{}", restored, where, ptrCount, ptrs));
+                if (!other.empty()) menu::log("chg" + other);
+            }
         }
     }
 };
