@@ -41,6 +41,11 @@ jobs:
         with:
           combine: true
           target: ${{ matrix.config.target }}
+          # Locked to a known-good bindings commit for GD 2.2081, and the code
+          # generator is built from it instead of downloading the newest one
+          # (which expects a newer Geode SDK than 5.11.2).
+          bindings-ref: d3a81aa011a4c2cc4a406d30321cd68d21ca9a80
+          configure-args: -DSKIP_BUILDING_CODEGEN=OFF
 
   package:
     name: Package builds
