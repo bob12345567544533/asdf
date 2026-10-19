@@ -173,23 +173,6 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
         depth--;
     }
 
-    // Ghost jumps and landings must not set off Event triggers in the real level.
-    void gameEventTriggered(GJGameEvent event, int material, int playerID) {
-        if (pb::g_simulating) return;
-        GJBaseGameLayer::gameEventTriggered(event, material, playerID);
-    }
-
-    // Safety net: nothing spawns or toggles groups while ghosts run.
-    void spawnGroup(int group, bool ordered, double delay, gd::vector<int> const& remapKeys, int triggerID, int controlID) {
-        if (pb::g_simulating) return;
-        GJBaseGameLayer::spawnGroup(group, ordered, delay, remapKeys, triggerID, controlID);
-    }
-
-    void toggleGroupTriggered(int group, bool activate, gd::vector<int> const& remapKeys, int triggerID, int controlID) {
-        if (pb::g_simulating) return;
-        GJBaseGameLayer::toggleGroupTriggered(group, activate, remapKeys, triggerID, controlID);
-    }
-
     bool canBeActivatedByPlayer(PlayerObject* player, EffectGameObject* object) {
         if (pb::g_simulating) return false;
         return GJBaseGameLayer::canBeActivatedByPlayer(player, object);

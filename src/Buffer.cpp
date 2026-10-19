@@ -237,6 +237,12 @@ struct StatsGuard {
     int chk = 0;
     bool chkValid = false;
     bool legit = false;
+    // Level timers and progress (only checked, for the diagnostic note).
+    double totalTime = 0;
+    double levelTime = 0;
+    unsigned int commandIndex = 0;
+    unsigned int progress = 0;
+    int currentStep = 0;
 
     explicit StatsGuard(PlayLayer* l) : layer(l), level(l ? l->m_level : nullptr) {
         jumps = layer->m_jumps;
@@ -245,6 +251,11 @@ struct StatsGuard {
         clicks = layer->m_clicks;
         attempts = layer->m_attempts;
         jumping = layer->m_jumping;
+        totalTime = layer->m_gameState.m_totalTime;
+        levelTime = layer->m_gameState.m_levelTime;
+        commandIndex = layer->m_gameState.m_commandIndex;
+        progress = layer->m_gameState.m_currentProgress;
+        currentStep = layer->m_currentStep;
         if (level) {
             levelAttempts = level->m_attempts;
             levelJumps = level->m_jumps;
@@ -263,9 +274,17 @@ struct StatsGuard {
                 || layer->m_clicks != clicks || layer->m_attempts != attempts
                 || (level && (level->m_jumps.value() != levelJumps.value() || level->m_clicks.value() != levelClicks.value()
                     || level->m_attempts.value() != levelAttempts.value() || level->m_chk != chk));
-            if (changed) {
+            auto const& now = layer->m_gameState;
+            char const* what = nullptr;
+            if (changed) what = "jump/click counters";
+            else if (now.m_totalTime != totalTime) what = "total time";
+            else if (now.m_levelTime != levelTime) what = "level time";
+            else if (now.m_commandIndex != commandIndex) what = "command index";
+            else if (now.m_currentProgress != progress) what = "progress";
+            else if (layer->m_currentStep != currentStep) what = "step counter";
+            if (what) {
                 reported = true;
-                menu::log("caught ghosts changing PB counters (fixed)");
+                menu::log(fmt::format("ghosts changed: {}", what));
             }
         }
         layer->m_jumps = jumps;

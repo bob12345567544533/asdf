@@ -1,3 +1,6 @@
+# v1.4.5
+- PB fix attempt: removed the v1.4.0 hooks on GD's event/spawn/toggle functions (the original mod never had them).
+
 # v1.4.3
 - Fixed PBs being thrown away when leaving the level: ghost runs could change the jump and click counters GD checks before saving progress. They are now restored after every ghost run.
 
