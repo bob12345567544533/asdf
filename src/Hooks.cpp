@@ -74,9 +74,11 @@ class $modify(PBPlayLayer, PlayLayer) {
     }
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
-        if (pb::g_simulating) {
+        if (pb::g_simulating && pb::isGhost(player)) {
             // A ghost hit something. Note it and stop: no death effects, no reset.
-            if (pb::isGhost(player)) pb::g_simDied = true;
+            // Only ghosts: GD's own calls for the real player (its anti-cheat
+            // check) must still go through, or GD refuses to save progress.
+            pb::g_simDied = true;
             return;
         }
         // PB diagnostics: what GD's save check sees around each death.

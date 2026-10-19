@@ -1,3 +1,6 @@
+# v1.4.9
+- Fixed PBs not saving: during ghost runs the death hook swallowed GD's anti-cheat call for the real player. Now only ghost deaths are caught, like the original mod.
+
 # v1.4.8
 - PB fix: the ghost simulation now mirrors the original Predictive Input Buffer exactly (same setup, same copied fields, same step order) and no longer hooks gravity flips.
 
