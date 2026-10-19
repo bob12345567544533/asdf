@@ -227,6 +227,41 @@ int levelPercent(PlayLayer* layer) {
     return static_cast<int>(std::clamp(pct, 0.f, 100.f));
 }
 
+// Ghost runs must leave GD exactly as it was. GD's collision code writes
+// bookkeeping into the level layer when a player touches blocks, and if that
+// sticks GD shows "New Best" but won't save it. Copy the layer's memory before
+// the ghosts run and put back every value they changed. Pointers are left
+// alone (lists GD grew or moved), only plain values are restored.
+struct LayerRestore {
+    PlayLayer* layer;
+    std::vector<uint64_t> saved;
+    explicit LayerRestore(PlayLayer* l) : layer(l) {
+        auto words = reinterpret_cast<uint64_t const*>(layer);
+        saved.assign(words, words + sizeof(PlayLayer) / 8);
+    }
+    static bool looksLikePointer(uint64_t v) {
+        return v >= 0x10000 && v <= 0x7fffffffffffull;
+    }
+    ~LayerRestore() {
+        auto words = reinterpret_cast<uint64_t*>(layer);
+        int restored = 0;
+        std::string where;
+        for (size_t i = 0; i < saved.size(); ++i) {
+            uint64_t now = words[i];
+            uint64_t was = saved[i];
+            if (now == was) continue;
+            if (looksLikePointer(now) && looksLikePointer(was)) continue;
+            words[i] = was;
+            if (restored++ < 6) where += fmt::format(" {:x}", i * 8);
+        }
+        static bool reported = false;
+        if (restored && !reported) {
+            reported = true;
+            menu::log(fmt::format("ghost fix: undid {} at{}", restored, where));
+        }
+    }
+};
+
 void setHeld(PlayerObject* ghost, int index, bool held) {
     if (held) ghost->pushButton(PlayerButton::Jump);
     else ghost->releaseButton(PlayerButton::Jump);
@@ -255,6 +290,7 @@ SimResult simulate(SimSetup const& s, int delay, int& budget) {
         auto real = s.reals[i];
 
         ghost->setVisible(false);
+        ghost->m_isDead = false;
         ghost->copyAttributes(real);
         ghost->setRotation(real->getRotation());
         ghost->setPosition(real->getPosition());
@@ -481,6 +517,7 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
 
     // Would this input kill you if it went through right now? If the ghost
     // survives, or reaches a portal/pad/orb first, let it through untouched.
+    LayerRestore restore(layer); // undoes whatever the ghost runs changed, on return
     auto base = simulate(s, 0, budget);
     if (!base.died) return false;
 
