@@ -298,11 +298,13 @@ struct StatsGuard {
 
     RawSnapshot rawLayer;
     RawSnapshot rawLevel;
+    RawSnapshot rawSpike; // GD's hidden anti-cheat spike object
 
     explicit StatsGuard(PlayLayer* l) : layer(l), level(l ? l->m_level : nullptr) {
         if (g_diffReports < 6) {
             rawLayer.take(layer, sizeof(PlayLayer));
             if (level) rawLevel.take(level, sizeof(GJGameLevel));
+            if (layer->m_anticheatSpike) rawSpike.take(layer->m_anticheatSpike, sizeof(GameObject));
         }
         jumps = layer->m_jumps;
         uncommittedJumps = layer->m_uncommittedJumps;
@@ -364,6 +366,8 @@ struct StatsGuard {
             }
             menu::log(line);
             menu::log("LV: " + (lv.empty() ? std::string("none") : lv));
+            auto sp = rawSpike.base ? rawSpike.diff(8) : std::string("no spike");
+            menu::log("SP: " + (sp.empty() ? std::string("none") : sp));
         }
         static bool reported = false;
         if (!reported) {
