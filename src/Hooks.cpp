@@ -55,7 +55,10 @@ class $modify(PBPlayLayer, PlayLayer) {
     void resetLevel() {
         pb::clearQueues();
         pb::resetTiming();
+        int bestBefore = m_level ? m_level->m_normalPercent.value() : -1;
         PlayLayer::resetLevel();
+        int bestAfter = m_level ? m_level->m_normalPercent.value() : -1;
+        if (bestAfter != bestBefore) pb::menu::log(fmt::format("restart: best {}>{}", bestBefore, bestAfter));
         m_fields->loggedDeath = false;
         m_fields->loggedAnticheat = false;
         pb::menu::attempt(m_attempts);
@@ -64,7 +67,10 @@ class $modify(PBPlayLayer, PlayLayer) {
     void onQuit() {
         pb::clearQueues();
         pb::clearGhosts(m_fields->ghost1.data(), m_fields->ghost2.data());
+        int bestBefore = m_level ? m_level->m_normalPercent.value() : -1;
+        auto level = m_level;
         PlayLayer::onQuit();
+        if (level) pb::menu::log(fmt::format("quit: best {}>{}", bestBefore, level->m_normalPercent.value()));
     }
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
@@ -98,6 +104,12 @@ class $modify(PBPlayLayer, PlayLayer) {
                     percent, bestBefore, bestAfter, practiceBefore, practiceAfter,
                     m_isPracticeMode ? 1 : 0, m_isTestMode ? 1 : 0, m_damageVerified ? 1 : 0,
                     m_passedIntegrity ? 1 : 0, m_fields->loggedAnticheat ? 1 : 0
+                ));
+                pb::menu::log(fmt::format(
+                    "clicks {} jumps {} unc {} | lvl c{} j{} | chk {} L{}",
+                    m_clicks, m_jumps, m_uncommittedJumps,
+                    m_level ? m_level->m_clicks.value() : -1, m_level ? m_level->m_jumps.value() : -1,
+                    m_level && m_level->m_isChkValid ? 1 : 0, m_level && m_level->m_isCompletionLegitimate ? 1 : 0
                 ));
             }
         }
