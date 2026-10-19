@@ -1453,14 +1453,14 @@ void logItem(gp::Graphics& g, Theme const& t, LogLook look, Item const& it, int 
         return;
     }
 
-    bool showTime = look != LogLook::Retro && look != LogLook::Lines;
+    // Every theme: time | level % | what happened.
     float x = r.X;
-    if (showTime) {
-        text(g, it.time, Face::Mono, 12.f, col(c.faint, alpha), box(x, r.Y, 62, r.Height));
-        x += 62.f;
+    text(g, it.time, Face::Mono, 12.f, col(c.faint, alpha), box(x, r.Y, 62, r.Height));
+    x += 62.f;
+    if (!pct.empty()) {
+        text(g, pct, Face::MonoBold, 12.f, col(c.danger, alpha), box(x, r.Y, 42, r.Height));
+        x += 42.f;
     }
-    if (!pct.empty()) text(g, pct, Face::MonoBold, 12.f, col(c.danger, alpha), box(x, r.Y, 42, r.Height));
-    if (!pct.empty() || !showTime) x += 42.f;
 
     RectF rest = box(x, r.Y, r.X + r.Width - x, r.Height);
     if (note) {
@@ -1694,12 +1694,15 @@ void paintHud(gp::Graphics& g, Theme const& t) {
         for (auto it = at.items.rbegin(); it != at.items.rend(); ++it) {
             if (y + 17.f > bottom) { full = true; break; }
             RectF r = box(area.X, y, area.Width, 17.f);
+            // time | % | "+3 wave (arrow)" | rnd
+            text(g, it->time, Face::Mono, 11.f, col(c.faint, alpha), r);
+            RectF rest = box(r.X + 62.f, r.Y, r.Width - 62.f, r.Height);
             if (!it->note.empty()) {
-                text(g, it->note, Face::Mono, 12.f, col(c.muted, alpha), r, A_CENTER);
+                text(g, it->note, Face::Mono, 12.f, col(c.muted, alpha), rest);
             }
             else {
-                text(g, percentText(it->percent), Face::MonoBold, 12.f, col(c.danger, alpha), r);
-                text(g, itemText(*it, ItemFmt::Hud), Face::Mono, 12.f, col(c.text, alpha), r, A_CENTER);
+                text(g, percentText(it->percent), Face::MonoBold, 12.f, col(c.danger, alpha), rest);
+                text(g, itemText(*it, ItemFmt::Hud), Face::Mono, 12.f, col(c.text, alpha), box(rest.X + 36.f, r.Y, rest.Width - 62.f, r.Height));
                 text(g, it->random ? L"rnd" : L"\u00b7", Face::Mono, 12.f, col(it->random ? c.rnd : 0x555555, alpha), r, A_RIGHT);
             }
             y += 17.f;
@@ -1885,11 +1888,12 @@ void paintTwoPane(gp::Graphics& g, Theme const& t) {
                 text(g, it->time + L"  " + it->note, Face::Mono, 12.f, col(c.muted, alpha), r);
             }
             else {
-                text(g, percentText(it->percent), Face::MonoBold, 12.f, col(c.danger, alpha), box(lx, y, 46, 18));
+                text(g, it->time, Face::Mono, 12.f, col(c.faint, alpha), box(lx, y, 62, 18));
+                text(g, percentText(it->percent), Face::MonoBold, 12.f, col(c.danger, alpha), box(lx + 62, y, 46, 18));
                 runs(g, {
                     { itemText(*it, ItemFmt::Full), Face::Mono, 12.f, col(c.text, alpha) },
                     { it->random ? L"   random" : L"", Face::Mono, 12.f, col(c.muted, alpha) },
-                }, box(lx + 46, y, lw - 46, 18));
+                }, box(lx + 108, y, lw - 108, 18));
             }
             y += 18;
             any = true;

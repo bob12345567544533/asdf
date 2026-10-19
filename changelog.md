@@ -1,4 +1,5 @@
 # v1.4.0
+- Every theme shows the time on each log line.
 - 20 window themes: Clean, Terminal, Compact HUD, Neon, Retro GD, Two-pane, Analytics, Big Numbers, Slate, Minimal, Paper (light), Nord, Vaporwave, Sunset, Matrix, Amber CRT, Dracula, Ocean, Noir Gold and Midnight HUD. Switch from the button in the window's title bar (hover a name for a live preview) or the new Window Theme setting.
 - Two-pane shows each attempt with a mini level bar and the % you died at. Analytics shows where in the level the buffer saves you the most.
 - The window no longer takes keyboard focus from the game when clicked, comes back on top with F7, stays sharp on every monitor and never gets bigger than the screen.
