@@ -46,6 +46,7 @@ class $modify(PBPlayLayer, PlayLayer) {
         if (auto overlay = pb::BufferOverlay::create()) {
             this->addChild(overlay, 10000);
         }
+        pb::menu::attempt(m_attempts);
         return true;
     }
 
@@ -53,6 +54,7 @@ class $modify(PBPlayLayer, PlayLayer) {
         pb::clearQueues();
         pb::g.tick = 0;
         PlayLayer::resetLevel();
+        pb::menu::attempt(m_attempts);
     }
 
     void onQuit() {

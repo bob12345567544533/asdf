@@ -132,7 +132,13 @@ std::atomic<bool> g_started = false;
 
 // Only touched on the window thread.
 Values g_values;
-std::deque<std::wstring> g_log;
+struct LogEntry {
+    std::wstring time;
+    std::wstring percent; // empty if not tied to a spot in the level
+    std::wstring text;
+    bool divider = false; // "Attempt N" header line
+};
+std::deque<LogEntry> g_log;
 int g_hover = -1; // see hitTest()
 int g_dragging = -1;    // slider being dragged, -1 if none
 bool g_dragMin = false; // dragging the buffer's left (min) handle
@@ -396,11 +402,35 @@ void paint(HWND wnd, HDC target) {
     if (g_log.empty()) {
         text(g, L"Nothing yet", 12.f, COL_MUTED, { logX, LOG_CARD_Y + 34.f, logW, LOG_LINE_H });
     }
+    // Columns: time | level % (red) | what happened. Older lines fade out a bit.
+    constexpr float TIME_W = 62.f;
+    constexpr float PCT_W = 40.f;
     for (size_t i = 0; i < g_log.size(); ++i) {
-        // Older lines fade out a bit.
-        BYTE fade = static_cast<BYTE>(std::max(90, 240 - static_cast<int>(i) * 14));
-        text(g, g_log[i], 12.f, gp::Color(255, fade, fade, fade),
-             { logX, LOG_CARD_Y + 34.f + i * LOG_LINE_H, logW, LOG_LINE_H },
+        auto const& e = g_log[i];
+        int fade = std::max(90, 240 - static_cast<int>(i) * 14);
+        float y = LOG_CARD_Y + 34.f + i * LOG_LINE_H;
+
+        if (e.divider) {
+            // "──── Attempt 12 ────"
+            gp::Pen line(gp::Color(255, 0x44, 0x44, 0x44), 1.f);
+            float mid = y + LOG_LINE_H / 2.f;
+            g.DrawLine(&line, logX, mid, logX + logW / 2.f - 50.f, mid);
+            g.DrawLine(&line, logX + logW / 2.f + 50.f, mid, logX + logW, mid);
+            text(g, e.text, 11.f, COL_MUTED, { logX, y, logW, LOG_LINE_H }, gp::StringAlignmentCenter, true);
+            continue;
+        }
+        BYTE muted = static_cast<BYTE>(fade * 0x9a / 0xf0);
+        BYTE bright = static_cast<BYTE>(fade);
+        BYTE redG = static_cast<BYTE>(fade * 0x50 / 0xf0);
+
+        text(g, e.time, 12.f, gp::Color(255, muted, muted, muted),
+             { logX, y, TIME_W, LOG_LINE_H }, gp::StringAlignmentNear, false, L"Consolas");
+        if (!e.percent.empty()) {
+            text(g, e.percent, 12.f, gp::Color(255, bright, redG, redG),
+                 { logX + TIME_W, y, PCT_W, LOG_LINE_H }, gp::StringAlignmentNear, true, L"Consolas");
+        }
+        text(g, e.text, 12.f, gp::Color(255, bright, bright, bright),
+             { logX + TIME_W + PCT_W, y, logW - TIME_W - PCT_W, LOG_LINE_H },
              gp::StringAlignmentNear, false, L"Consolas");
     }
 
@@ -574,9 +604,12 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
 
         case WM_PB_LOG: {
-            auto line = reinterpret_cast<std::wstring*>(lParam);
-            g_log.push_front(std::move(*line));
-            delete line;
+            auto entry = reinterpret_cast<LogEntry*>(lParam);
+            // Back-to-back attempt headers mean nothing happened in that
+            // attempt: replace the old header instead of stacking them.
+            if (entry->divider && !g_log.empty() && g_log.front().divider) g_log.front() = std::move(*entry);
+            else g_log.push_front(std::move(*entry));
+            delete entry;
             while (g_log.size() > LOG_LINES) g_log.pop_back();
             if (IsWindowVisible(wnd)) InvalidateRect(wnd, nullptr, FALSE);
             return 0;
@@ -818,7 +851,14 @@ void sync() {
     if (!PostMessageW(wnd, WM_PB_SYNC, 0, reinterpret_cast<LPARAM>(values))) delete values;
 }
 
-void log(std::string const& line) {
+std::wstring widen(std::string const& s) {
+    int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), nullptr, 0);
+    std::wstring out(static_cast<size_t>(len), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), out.data(), len);
+    return out;
+}
+
+void log(std::string const& line, int percent) {
     HWND wnd = g_window.load();
     if (!wnd) return;
 
@@ -829,12 +869,19 @@ void log(std::string const& line) {
     char stamp[16];
     std::strftime(stamp, sizeof(stamp), "%H:%M:%S", &local);
 
-    std::string full = std::string(stamp) + "  " + line;
-    int len = MultiByteToWideChar(CP_UTF8, 0, full.c_str(), static_cast<int>(full.size()), nullptr, 0);
-    auto wide = new std::wstring(static_cast<size_t>(len), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, full.c_str(), static_cast<int>(full.size()), wide->data(), len);
+    auto entry = new LogEntry {
+        widen(stamp),
+        percent >= 0 ? std::to_wstring(percent) + L"%" : std::wstring(),
+        widen(line),
+    };
+    if (!PostMessageW(wnd, WM_PB_LOG, 0, reinterpret_cast<LPARAM>(entry))) delete entry;
+}
 
-    if (!PostMessageW(wnd, WM_PB_LOG, 0, reinterpret_cast<LPARAM>(wide))) delete wide;
+void attempt(int number) {
+    HWND wnd = g_window.load();
+    if (!wnd) return;
+    auto entry = new LogEntry { L"", L"", L"Attempt " + std::to_wstring(number), true };
+    if (!PostMessageW(wnd, WM_PB_LOG, 0, reinterpret_cast<LPARAM>(entry))) delete entry;
 }
 
 } // namespace pb::menu
@@ -851,7 +898,9 @@ void open() {}
 
 void sync() {}
 
-void log(std::string const&) {}
+void log(std::string const&, int) {}
+
+void attempt(int) {}
 
 } // namespace pb::menu
 

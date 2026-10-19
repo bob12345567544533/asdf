@@ -16,6 +16,10 @@ void open();
 void sync();
 
 // Adds a line to the window's live log. Call from the main thread.
-void log(std::string const& line);
+// `percent` is the level % it happened at (shown in red), -1 to leave it out.
+void log(std::string const& line, int percent = -1);
+
+// Starts a new attempt section in the log ("-- Attempt 12 --").
+void attempt(int number);
 
 } // namespace pb::menu

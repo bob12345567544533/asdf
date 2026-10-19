@@ -445,7 +445,7 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
         menu::log(fmt::format(
             "+{} tick{} ({:.1f} ms)  {} {}",
             chosen, chosen == 1 ? "" : "s", earlyMs, modeName(mainMode), down ? "press" : "release"
-        ));
+        ), static_cast<int>(layer->getCurrentPercent()));
         return true;
     }
 

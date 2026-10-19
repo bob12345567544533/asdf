@@ -1,3 +1,7 @@
+# v1.2.0
+- The log shows the level % each buffered click happened at, in red.
+- The log groups events by attempt with an "Attempt N" divider.
+
 # v1.1.0
 - The Buffer slider is now a range with two handles (min and max), e.g. 1-4 ticks. The buffer only uses delays inside that range.
 
