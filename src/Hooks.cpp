@@ -19,9 +19,6 @@ class $modify(PBPlayLayer, PlayLayer) {
     struct Fields {
         Ref<PlayerObject> ghost1;
         Ref<PlayerObject> ghost2;
-        bool loggedDeath = false;     // PB diagnostics, once per attempt
-        bool loggedAnticheat = false;
-
         ~Fields() {
             pb::clearGhosts(ghost1.data(), ghost2.data());
         }
@@ -55,65 +52,32 @@ class $modify(PBPlayLayer, PlayLayer) {
     void resetLevel() {
         pb::clearQueues();
         pb::resetTiming();
-        int bestBefore = m_level ? m_level->m_normalPercent.value() : -1;
         PlayLayer::resetLevel();
-        int bestAfter = m_level ? m_level->m_normalPercent.value() : -1;
-        if (bestAfter != bestBefore) pb::menu::log(fmt::format("restart: best {}>{}", bestBefore, bestAfter));
-        m_fields->loggedDeath = false;
-        m_fields->loggedAnticheat = false;
         pb::menu::attempt(m_attempts);
     }
 
     void onQuit() {
         pb::clearQueues();
         pb::clearGhosts(m_fields->ghost1.data(), m_fields->ghost2.data());
-        int bestBefore = m_level ? m_level->m_normalPercent.value() : -1;
-        auto level = m_level;
         PlayLayer::onQuit();
-        if (level) pb::menu::log(fmt::format("quit: best {}>{}", bestBefore, level->m_normalPercent.value()));
     }
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
         if (pb::g_simulating && pb::isGhost(player)) {
             // A ghost hit something. Note it and stop: no death effects, no reset.
-            // Only ghosts: GD's own calls for the real player (its anti-cheat
-            // check) must still go through, or GD refuses to save progress.
             pb::g_simDied = true;
             return;
         }
-        // PB diagnostics: what GD's save check sees around each death.
-        int bestBefore = m_level ? m_level->m_normalPercent.value() : -1;
-        int practiceBefore = m_level ? m_level->m_practicePercent : -1;
-        bool anticheatHit = object && object == m_anticheatSpike;
-
         PlayLayer::destroyPlayer(player, object);
 
-        if (anticheatHit && !m_fields->loggedAnticheat) {
-            m_fields->loggedAnticheat = true;
-            pb::menu::log("anti-cheat check hit");
-        }
         // Only drop held inputs if you actually died (noclip keeps you alive).
         if (player && player->m_isDead) {
             pb::clearQueues();
-            int percent = static_cast<int>(this->getCurrentPercent());
-            pb::menu::death(percent);
-            if (!m_fields->loggedDeath) {
-                m_fields->loggedDeath = true;
-                int bestAfter = m_level ? m_level->m_normalPercent.value() : -1;
-                int practiceAfter = m_level ? m_level->m_practicePercent : -1;
-                pb::menu::log(fmt::format(
-                    "{}% best {}>{} prac {}>{} p{} t{} d{} i{} a{}",
-                    percent, bestBefore, bestAfter, practiceBefore, practiceAfter,
-                    m_isPracticeMode ? 1 : 0, m_isTestMode ? 1 : 0, m_damageVerified ? 1 : 0,
-                    m_passedIntegrity ? 1 : 0, m_fields->loggedAnticheat ? 1 : 0
-                ));
-                pb::menu::log(fmt::format(
-                    "clicks {} jumps {} unc {} | lvl c{} j{} | chk {} L{}",
-                    m_clicks, m_jumps, m_uncommittedJumps,
-                    m_level ? m_level->m_clicks.value() : -1, m_level ? m_level->m_jumps.value() : -1,
-                    m_level && m_level->m_isChkValid ? 1 : 0, m_level && m_level->m_isCompletionLegitimate ? 1 : 0
-                ));
+            int percent = -1;
+            if (m_player1 && m_levelLength > 0.f) {
+                percent = static_cast<int>(std::clamp(m_player1->getPositionX() / m_levelLength * 100.f, 0.f, 100.f));
             }
+            pb::menu::death(percent);
         }
     }
 

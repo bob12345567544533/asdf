@@ -219,239 +219,13 @@ struct SimSetup {
     int decideAfter = -1;
 };
 
-// Ghost runs must not change anything GD counts for its progress check:
-// jumps, clicks, attempts and the level's checksum over them. If they change
-// behind GD's back, GD shows "New Best" but throws the PB away when you leave
-// the level. Snapshot everything before the ghosts run and put it back after.
-// Diagnostic: byte-level diff of an object before/after the ghost runs, as
-// "0x36cc 0x3a10-0x3a17 ..." (offsets into the object).
-struct RawSnapshot {
-    uint8_t const* base = nullptr;
-    std::vector<uint8_t> bytes;
-    void take(void const* object, size_t size) {
-        base = static_cast<uint8_t const*>(object);
-        bytes.assign(base, base + size);
-    }
-    std::string diff(size_t maxRanges) const {
-        std::string out;
-        size_t ranges = 0;
-        size_t i = 0;
-        while (i < bytes.size() && ranges < maxRanges) {
-            if (base[i] == bytes[i]) { ++i; continue; }
-            size_t start = i;
-            while (i < bytes.size() && (base[i] != bytes[i] || (i + 1 < bytes.size() && base[i + 1] != bytes[i + 1]))) ++i;
-            if (!out.empty()) out += ' ';
-            out += i - 1 > start ? fmt::format("{:x}-{:x}", start, i - 1) : fmt::format("{:x}", start);
-            ++ranges;
-        }
-        return out;
-    }
-};
-
-int g_diffReports = 0; // first few clicks only
-
-struct StatsGuard {
-    PlayLayer* layer;
-    GJGameLevel* level;
-    int jumps;
-    int uncommittedJumps;
-    bool hasJumped;
-    int clicks;
-    int attempts;
-    bool jumping;
-    geode::SeedValueRSV levelAttempts;
-    geode::SeedValueRSV levelJumps;
-    geode::SeedValueRSV levelClicks;
-    geode::SeedValueRSV levelAttemptTime;
-    int chk = 0;
-    bool chkValid = false;
-    bool legit = false;
-    // Level timers and progress (only checked, for the diagnostic note).
-    double totalTime = 0;
-    double levelTime = 0;
-    unsigned int commandIndex = 0;
-    unsigned int progress = 0;
-    int currentStep = 0;
-    // PlayLayer flags around GD's anti-cheat and progress checks.
-    decltype(PlayLayer::m_unk36c8) s_m_unk36c8 {};
-    decltype(PlayLayer::m_unk36cc) s_m_unk36cc {};
-    decltype(PlayLayer::m_unk36cd) s_m_unk36cd {};
-    decltype(PlayLayer::m_unk36ce) s_m_unk36ce {};
-    decltype(PlayLayer::m_unk36cf) s_m_unk36cf {};
-    decltype(PlayLayer::m_damageVerified) s_m_damageVerified {};
-    decltype(PlayLayer::m_passedIntegrity) s_m_passedIntegrity {};
-    decltype(PlayLayer::m_isIgnoreDamageEnabled) s_m_isIgnoreDamageEnabled {};
-    decltype(PlayLayer::m_unk376d) s_m_unk376d {};
-    decltype(PlayLayer::m_unk377c) s_m_unk377c {};
-    decltype(PlayLayer::m_unk3788) s_m_unk3788 {};
-    decltype(PlayLayer::m_unk378c) s_m_unk378c {};
-    decltype(PlayLayer::m_endChecked) s_m_endChecked {};
-    decltype(PlayLayer::m_unk37b0) s_m_unk37b0 {};
-    decltype(PlayLayer::m_unk37b1) s_m_unk37b1 {};
-    decltype(PlayLayer::m_unk37cc) s_m_unk37cc {};
-    decltype(PlayLayer::m_unk37e0) s_m_unk37e0 {};
-    decltype(PlayLayer::m_hasCompletedLevel) s_m_hasCompletedLevel {};
-    decltype(PlayLayer::m_lastAttemptPercent) s_m_lastAttemptPercent {};
-    decltype(PlayLayer::m_unk38c8) s_m_unk38c8 {};
-    decltype(PlayLayer::m_unk38d0) s_m_unk38d0 {};
-    decltype(PlayLayer::m_isTestMode) s_m_isTestMode {};
-    decltype(PlayLayer::m_isPracticeMode) s_m_isPracticeMode {};
-
-    RawSnapshot rawLayer;
-    RawSnapshot rawLevel;
-    RawSnapshot rawSpike; // GD's hidden anti-cheat spike object
-
-    explicit StatsGuard(PlayLayer* l) : layer(l), level(l ? l->m_level : nullptr) {
-        if (g_diffReports < 6) {
-            rawLayer.take(layer, sizeof(PlayLayer));
-            if (level) rawLevel.take(level, sizeof(GJGameLevel));
-            if (layer->m_anticheatSpike) rawSpike.take(layer->m_anticheatSpike, sizeof(GameObject));
-        }
-        jumps = layer->m_jumps;
-        uncommittedJumps = layer->m_uncommittedJumps;
-        hasJumped = layer->m_hasJumped;
-        clicks = layer->m_clicks;
-        attempts = layer->m_attempts;
-        jumping = layer->m_jumping;
-        totalTime = layer->m_gameState.m_totalTime;
-        levelTime = layer->m_gameState.m_levelTime;
-        commandIndex = layer->m_gameState.m_commandIndex;
-        progress = layer->m_gameState.m_currentProgress;
-        currentStep = layer->m_currentStep;
-        s_m_unk36c8 = layer->m_unk36c8;
-        s_m_unk36cc = layer->m_unk36cc;
-        s_m_unk36cd = layer->m_unk36cd;
-        s_m_unk36ce = layer->m_unk36ce;
-        s_m_unk36cf = layer->m_unk36cf;
-        s_m_damageVerified = layer->m_damageVerified;
-        s_m_passedIntegrity = layer->m_passedIntegrity;
-        s_m_isIgnoreDamageEnabled = layer->m_isIgnoreDamageEnabled;
-        s_m_unk376d = layer->m_unk376d;
-        s_m_unk377c = layer->m_unk377c;
-        s_m_unk3788 = layer->m_unk3788;
-        s_m_unk378c = layer->m_unk378c;
-        s_m_endChecked = layer->m_endChecked;
-        s_m_unk37b0 = layer->m_unk37b0;
-        s_m_unk37b1 = layer->m_unk37b1;
-        s_m_unk37cc = layer->m_unk37cc;
-        s_m_unk37e0 = layer->m_unk37e0;
-        s_m_hasCompletedLevel = layer->m_hasCompletedLevel;
-        s_m_lastAttemptPercent = layer->m_lastAttemptPercent;
-        s_m_unk38c8 = layer->m_unk38c8;
-        s_m_unk38d0 = layer->m_unk38d0;
-        s_m_isTestMode = layer->m_isTestMode;
-        s_m_isPracticeMode = layer->m_isPracticeMode;
-        if (level) {
-            levelAttempts = level->m_attempts;
-            levelJumps = level->m_jumps;
-            levelClicks = level->m_clicks;
-            levelAttemptTime = level->m_attemptTime;
-            chk = level->m_chk;
-            chkValid = level->m_isChkValid;
-            legit = level->m_isCompletionLegitimate;
-        }
-    }
-
-    ~StatsGuard() {
-        if (g_diffReports < 6 && rawLayer.base) {
-            ++g_diffReports;
-            auto pl = rawLayer.diff(12);
-            auto lv = rawLevel.base ? rawLevel.diff(8) : std::string();
-            log::info("[PB diag] PlayLayer changed: {} | Level changed: {}", pl, lv);
-            // Split into window-sized lines.
-            std::string line = "PL:";
-            std::istringstream words(pl.empty() ? std::string("none") : pl);
-            for (std::string w; words >> w;) {
-                if (line.size() + w.size() > 40) { menu::log(line); line = "PL:"; }
-                line += " " + w;
-            }
-            menu::log(line);
-            menu::log("LV: " + (lv.empty() ? std::string("none") : lv));
-            auto sp = rawSpike.base ? rawSpike.diff(8) : std::string("no spike");
-            menu::log("SP: " + (sp.empty() ? std::string("none") : sp));
-        }
-        static bool reported = false;
-        if (!reported) {
-            bool changed = layer->m_jumps != jumps || layer->m_uncommittedJumps != uncommittedJumps
-                || layer->m_clicks != clicks || layer->m_attempts != attempts
-                || (level && (level->m_jumps.value() != levelJumps.value() || level->m_clicks.value() != levelClicks.value()
-                    || level->m_attempts.value() != levelAttempts.value() || level->m_chk != chk));
-            auto const& now = layer->m_gameState;
-            char const* what = nullptr;
-            if (changed) what = "jump/click counters";
-            else if (now.m_totalTime != totalTime) what = "total time";
-            else if (now.m_levelTime != levelTime) what = "level time";
-            else if (now.m_commandIndex != commandIndex) what = "command index";
-            else if (now.m_currentProgress != progress) what = "progress";
-            else if (layer->m_currentStep != currentStep) what = "step counter";
-            else if (layer->m_unk36c8 != s_m_unk36c8) what = "m_unk36c8";
-            else if (layer->m_unk36cc != s_m_unk36cc) what = "m_unk36cc";
-            else if (layer->m_unk36cd != s_m_unk36cd) what = "m_unk36cd";
-            else if (layer->m_unk36ce != s_m_unk36ce) what = "m_unk36ce";
-            else if (layer->m_unk36cf != s_m_unk36cf) what = "m_unk36cf";
-            else if (layer->m_damageVerified != s_m_damageVerified) what = "m_damageVerified";
-            else if (layer->m_passedIntegrity != s_m_passedIntegrity) what = "m_passedIntegrity";
-            else if (layer->m_isIgnoreDamageEnabled != s_m_isIgnoreDamageEnabled) what = "m_isIgnoreDamageEnabled";
-            else if (layer->m_unk376d != s_m_unk376d) what = "m_unk376d";
-            else if (layer->m_unk377c != s_m_unk377c) what = "m_unk377c";
-            else if (layer->m_unk3788 != s_m_unk3788) what = "m_unk3788";
-            else if (layer->m_unk378c != s_m_unk378c) what = "m_unk378c";
-            else if (layer->m_endChecked != s_m_endChecked) what = "m_endChecked";
-            else if (layer->m_unk37b0 != s_m_unk37b0) what = "m_unk37b0";
-            else if (layer->m_unk37b1 != s_m_unk37b1) what = "m_unk37b1";
-            else if (layer->m_unk37cc != s_m_unk37cc) what = "m_unk37cc";
-            else if (layer->m_unk37e0 != s_m_unk37e0) what = "m_unk37e0";
-            else if (layer->m_hasCompletedLevel != s_m_hasCompletedLevel) what = "m_hasCompletedLevel";
-            else if (layer->m_lastAttemptPercent != s_m_lastAttemptPercent) what = "m_lastAttemptPercent";
-            else if (layer->m_unk38c8 != s_m_unk38c8) what = "m_unk38c8";
-            else if (layer->m_unk38d0 != s_m_unk38d0) what = "m_unk38d0";
-            else if (layer->m_isTestMode != s_m_isTestMode) what = "m_isTestMode";
-            else if (layer->m_isPracticeMode != s_m_isPracticeMode) what = "m_isPracticeMode";
-            if (what) {
-                reported = true;
-                menu::log(fmt::format("ghosts changed: {}", what));
-            }
-        }
-        layer->m_jumps = jumps;
-        layer->m_uncommittedJumps = uncommittedJumps;
-        layer->m_hasJumped = hasJumped;
-        layer->m_clicks = clicks;
-        layer->m_attempts = attempts;
-        layer->m_jumping = jumping;
-        layer->m_unk36c8 = s_m_unk36c8;
-        layer->m_unk36cc = s_m_unk36cc;
-        layer->m_unk36cd = s_m_unk36cd;
-        layer->m_unk36ce = s_m_unk36ce;
-        layer->m_unk36cf = s_m_unk36cf;
-        layer->m_damageVerified = s_m_damageVerified;
-        layer->m_passedIntegrity = s_m_passedIntegrity;
-        layer->m_isIgnoreDamageEnabled = s_m_isIgnoreDamageEnabled;
-        layer->m_unk376d = s_m_unk376d;
-        layer->m_unk377c = s_m_unk377c;
-        layer->m_unk3788 = s_m_unk3788;
-        layer->m_unk378c = s_m_unk378c;
-        layer->m_endChecked = s_m_endChecked;
-        layer->m_unk37b0 = s_m_unk37b0;
-        layer->m_unk37b1 = s_m_unk37b1;
-        layer->m_unk37cc = s_m_unk37cc;
-        layer->m_unk37e0 = s_m_unk37e0;
-        layer->m_hasCompletedLevel = s_m_hasCompletedLevel;
-        layer->m_lastAttemptPercent = s_m_lastAttemptPercent;
-        layer->m_unk38c8 = s_m_unk38c8;
-        layer->m_unk38d0 = s_m_unk38d0;
-        layer->m_isTestMode = s_m_isTestMode;
-        layer->m_isPracticeMode = s_m_isPracticeMode;
-        if (level) {
-            level->m_attempts = levelAttempts;
-            level->m_jumps = levelJumps;
-            level->m_clicks = levelClicks;
-            level->m_attemptTime = levelAttemptTime;
-            level->m_chk = chk;
-            level->m_isChkValid = chkValid;
-            level->m_isCompletionLegitimate = legit;
-        }
-    }
-};
+// Level % for the log, worked out from the player's position. Doesn't call
+// GD's own percent function, which isn't safe to call mid-step.
+int levelPercent(PlayLayer* layer) {
+    if (!layer || !layer->m_player1 || layer->m_levelLength <= 0.f) return -1;
+    float pct = layer->m_player1->getPositionX() / layer->m_levelLength * 100.f;
+    return static_cast<int>(std::clamp(pct, 0.f, 100.f));
+}
 
 void setHeld(PlayerObject* ghost, int index, bool held) {
     if (held) ghost->pushButton(PlayerButton::Jump);
@@ -694,7 +468,6 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
 
     // Would this input kill you if it went through right now? If the ghost
     // survives, or reaches a portal/pad/orb first, let it through untouched.
-    StatsGuard stats(layer); // restores GD's counters when onButton returns
     auto base = simulate(s, 0, budget);
     if (!base.died) return false;
 
@@ -802,7 +575,7 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
     if (auto overlay = BufferOverlay::get(layer)) {
         overlay->showBuffered(earlyMs, chosen, mainMode, !down, randomPick);
     }
-    menu::saved(chosen, earlyMs, static_cast<int>(mainMode), !down, randomPick, static_cast<int>(layer->getCurrentPercent()));
+    menu::saved(chosen, earlyMs, static_cast<int>(mainMode), !down, randomPick, levelPercent(layer));
     return true;
 }
 
