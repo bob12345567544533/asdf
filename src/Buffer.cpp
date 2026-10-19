@@ -232,69 +232,46 @@ int levelPercent(PlayLayer* layer) {
 // sticks GD shows "New Best" but won't save it. Copy the layer's memory before
 // the ghosts run and put back every value they changed. Pointers are left
 // alone (lists GD grew or moved), only plain values are restored.
-struct Watch {
-    char const* name;
-    uint64_t* base = nullptr;
-    std::vector<uint64_t> saved;
-    void take(void* object, size_t size) {
-        if (!object) return;
-        base = static_cast<uint64_t*>(object);
-        saved.assign(base, base + size / 8);
-    }
-};
-
+// Ghost runs must leave GD exactly as it was. When a ghost touches a block or
+// spike, GD adds it to the level's "touched this step" lists, which belong to
+// the real player. Left there, GD counts a touch that never happened and
+// throws your PB away. Save those lists before the ghosts run and put them
+// back after, plus any other plain value the runs changed in the level layer.
 struct LayerRestore {
     PlayLayer* layer;
     std::vector<uint64_t> saved;
-    std::array<Watch, 5> watches { Watch{"P1"}, Watch{"LV"}, Watch{"GM"}, Watch{"GS"}, Watch{"P2"} };
-    static inline int reports = 0;
+    int solidCount, solidIndex, hazardCount, hazardIndex;
+    gd::vector<GameObject*> solids;
+    gd::vector<GameObject*> hazards;
+
     explicit LayerRestore(PlayLayer* l) : layer(l) {
         auto words = reinterpret_cast<uint64_t const*>(layer);
         saved.assign(words, words + sizeof(PlayLayer) / 8);
-        if (reports < 3) {
-            watches[0].take(layer->m_player1, sizeof(PlayerObject));
-            watches[1].take(layer->m_level, sizeof(GJGameLevel));
-            watches[2].take(GameManager::get(), sizeof(GameManager));
-            watches[3].take(GameStatsManager::get(), sizeof(GameStatsManager));
-            watches[4].take(layer->m_player2, sizeof(PlayerObject));
-        }
+        solidCount = layer->m_solidCollisionObjectsCount;
+        solidIndex = layer->m_solidCollisionObjectsIndex;
+        hazardCount = layer->m_hazardCollisionObjectsCount;
+        hazardIndex = layer->m_hazardCollisionObjectsIndex;
+        solids = layer->m_solidCollisionObjects;
+        hazards = layer->m_hazardCollisionObjects;
     }
     static bool looksLikePointer(uint64_t v) {
         return v >= 0x10000 && v <= 0x7fffffffffffull;
     }
     ~LayerRestore() {
         auto words = reinterpret_cast<uint64_t*>(layer);
-        int restored = 0;
-        std::string where, ptrs;
-        int ptrCount = 0;
         for (size_t i = 0; i < saved.size(); ++i) {
             uint64_t now = words[i];
             uint64_t was = saved[i];
             if (now == was) continue;
-            if (looksLikePointer(now) && looksLikePointer(was)) {
-                if (ptrCount++ < 6) ptrs += fmt::format(" {:x}", i * 8);
-                continue;
-            }
+            if (looksLikePointer(now) && looksLikePointer(was)) continue; // lists, handled below
             words[i] = was;
-            if (restored++ < 6) where += fmt::format(" {:x}", i * 8);
         }
-        if (reports < 3 && (restored || ptrCount || true)) {
-            std::string other;
-            for (auto& w : watches) {
-                if (!w.base) continue;
-                int n = 0;
-                std::string at;
-                for (size_t i = 0; i < w.saved.size(); ++i) {
-                    if (w.base[i] != w.saved[i] && n++ < 5) at += fmt::format(" {:x}", i * 8);
-                }
-                if (n) other += fmt::format(" {}:{}{}", w.name, n, at);
-            }
-            if (restored || ptrCount || !other.empty()) {
-                reports++;
-                menu::log(fmt::format("fix {}:{} ptr {}:{}", restored, where, ptrCount, ptrs));
-                if (!other.empty()) menu::log("chg" + other);
-            }
-        }
+        layer->m_solidCollisionObjects = solids;
+        layer->m_hazardCollisionObjects = hazards;
+        layer->m_solidCollisionObjectsCount = solidCount;
+        layer->m_solidCollisionObjectsIndex = solidIndex;
+        layer->m_hazardCollisionObjectsCount = hazardCount;
+        layer->m_hazardCollisionObjectsIndex = hazardIndex;
     }
 };
 
