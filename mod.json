@@ -8,7 +8,7 @@
 	},
 	"id": "lilwc.input-buffer-lite",
 	"name": "Input Buffer Lite",
-	"version": "v1.0.0",
+	"version": "v1.1.0",
 	"developer": "lilWC",
 	"description": "Input timing tweaks.",
 	"tags": ["gameplay"],
@@ -20,10 +20,19 @@
 		},
 		"buffer-ticks": {
 			"type": "int",
-			"name": "Ticks",
+			"name": "Max Ticks",
 			"description": "1 tick = 4.17 ms at 240 TPS.",
 			"default": 2,
 			"min": 0,
+			"max": 24,
+			"control": { "arrow-step": 1, "slider-step": 1 }
+		},
+		"buffer-min-ticks": {
+			"type": "int",
+			"name": "Min Ticks",
+			"description": "Smallest delay the buffer will use. With Min 1 and Ticks 4 it only delays by 1 to 4 ticks.",
+			"default": 1,
+			"min": 1,
 			"max": 24,
 			"control": { "arrow-step": 1, "slider-step": 1 }
 		},

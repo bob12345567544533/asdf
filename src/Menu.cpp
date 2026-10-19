@@ -66,7 +66,7 @@ constexpr int SLIDER_MAX[SLIDER_COUNT] { MAX_TICKS };
 constexpr Unit SLIDER_UNIT[SLIDER_COUNT] { Unit::Ticks };
 constexpr char const* SLIDER_KEYS[SLIDER_COUNT] { "buffer-ticks" };
 constexpr wchar_t const* SLIDER_DESCS[SLIDER_COUNT] {
-    L"Holds clicks that are a little too early and would kill you, then fires them on the step where they survive.",
+    L"Holds early clicks that would kill you and fires them later, only using delays inside this range. Drag either handle.",
 };
 constexpr wchar_t const* SLIDER_NAMES[SLIDER_COUNT] { L"Buffer" };
 
@@ -104,7 +104,8 @@ constexpr DWORD EXCLUDE_FROM_CAPTURE = 0x00000011;
 // ---------------------------------------------------------------------------
 
 struct Values {
-    int sliders[SLIDER_COUNT] { 2 };
+    int sliders[SLIDER_COUNT] { 2 }; // buffer: max ticks
+    int minTicks = 1;                // buffer: min ticks (left handle)
     bool toggles[TOGGLE_COUNT] { true, true, false, true };
     bool hasPos = false;
     int x = 0;
@@ -134,6 +135,7 @@ Values g_values;
 std::deque<std::wstring> g_log;
 int g_hover = -1; // see hitTest()
 int g_dragging = -1;    // slider being dragged, -1 if none
+bool g_dragMin = false; // dragging the buffer's left (min) handle
 int g_focusSlider = 0;  // slider the arrow keys move
 bool g_placed = false;
 float g_scale = 1.f;
@@ -143,6 +145,7 @@ Values readSettings() {
     auto mod = Mod::get();
     Values v;
     for (int i = 0; i < SLIDER_COUNT; ++i) v.sliders[i] = static_cast<int>(mod->getSettingValue<int64_t>(SLIDER_KEYS[i]));
+    v.minTicks = static_cast<int>(mod->getSettingValue<int64_t>("buffer-min-ticks"));
     for (int i = 0; i < TOGGLE_COUNT; ++i) v.toggles[i] = mod->getSettingValue<bool>(TOGGLE_KEYS[i]);
     v.hasPos = mod->getSavedValue<bool>("window-has-pos", false);
     v.x = static_cast<int>(mod->getSavedValue<int64_t>("window-x", 0));
@@ -154,6 +157,7 @@ Values readSettings() {
 void writeSettings(Values const& v) {
     auto mod = Mod::get();
     for (int i = 0; i < SLIDER_COUNT; ++i) mod->setSettingValue<int64_t>(SLIDER_KEYS[i], v.sliders[i]);
+    mod->setSettingValue<int64_t>("buffer-min-ticks", v.minTicks);
     for (int i = 0; i < TOGGLE_COUNT; ++i) mod->setSettingValue<bool>(TOGGLE_KEYS[i], v.toggles[i]);
 }
 
@@ -195,6 +199,15 @@ std::wstring valueLabel(int slider, int value) {
         case Unit::Pixels: std::swprintf(buf, 48, L"%d px", value); break;
         case Unit::Slower: std::swprintf(buf, 48, L"%d%% slower", value); break;
     }
+    return buf;
+}
+
+// "1-4 ticks · 4.2-16.7 ms" for the buffer's range.
+std::wstring rangeLabel(int lo, int hi) {
+    if (hi == 0) return L"off";
+    if (lo >= hi) return valueLabel(0, hi);
+    wchar_t buf[64];
+    std::swprintf(buf, 64, L"%d\u2013%d ticks \u00b7 %.1f\u2013%.1f ms", lo, hi, lo * 1000.0 / 240.0, hi * 1000.0 / 240.0);
     return buf;
 }
 
@@ -346,13 +359,18 @@ void paint(HWND wnd, HDC target) {
         }
 
         text(g, SLIDER_NAMES[i], 13.f, value > 0 ? COL_TEXT : COL_MUTED, { SLIDER_X0, rowY + 5.f, 190.f, 22.f });
-        text(g, valueLabel(i, value), 12.f, value > 0 ? COL_TEXT : COL_MUTED,
+        bool range = i == 0; // the buffer slider has two handles: min and max
+        int lo = range ? std::min(g_values.minTicks, value) : 0;
+        text(g, range ? rangeLabel(lo, value) : valueLabel(i, value), 12.f, value > 0 ? COL_TEXT : COL_MUTED,
              { SLIDER_X0, rowY + 5.f, SLIDER_X1 - SLIDER_X0, 22.f }, gp::StringAlignmentFar);
 
         float tx = thumbX(i, value);
+        float lx = range && value > 0 ? thumbX(i, lo) : SLIDER_X0;
         fillRound(g, COL_TRACK, { SLIDER_X0, y - 2.f, SLIDER_X1 - SLIDER_X0, 4.f }, 2.f);
-        if (tx > SLIDER_X0) fillRound(g, COL_TEXT, { SLIDER_X0, y - 2.f, tx - SLIDER_X0, 4.f }, 2.f);
-        fillRound(g, gp::Color(255, 0xff, 0xff, 0xff), { tx - 4.f, y - 9.f, 8.f, 18.f }, 4.f);
+        if (tx > lx) fillRound(g, COL_TEXT, { lx, y - 2.f, tx - lx, 4.f }, 2.f);
+        gp::Color handle(255, 0xff, 0xff, 0xff);
+        if (range && value > 0) fillRound(g, handle, { lx - 4.f, y - 9.f, 8.f, 18.f }, 4.f);
+        fillRound(g, handle, { tx - 4.f, y - 9.f, 8.f, 18.f }, 4.f);
     }
 
     // Toggle card (right column)
@@ -500,6 +518,19 @@ void setSlider(HWND wnd, int slider, int value, bool commit) {
     value = std::clamp(value, 0, SLIDER_MAX[slider]);
     if (value != g_values.sliders[slider]) {
         g_values.sliders[slider] = value;
+        // Max handle pushed below the min handle: drag the min along.
+        if (slider == 0 && value > 0 && g_values.minTicks > value) g_values.minTicks = value;
+        InvalidateRect(wnd, nullptr, FALSE);
+    }
+    if (commit) save();
+}
+
+// Buffer's left handle: 1 tick minimum, never past the max handle.
+void setMinTicks(HWND wnd, int value, bool commit) {
+    int hi = g_values.sliders[0];
+    value = std::clamp(value, 1, std::max(1, hi));
+    if (value != g_values.minTicks) {
+        g_values.minTicks = value;
         InvalidateRect(wnd, nullptr, FALSE);
     }
     if (commit) save();
@@ -532,6 +563,7 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             auto values = reinterpret_cast<Values*>(lParam);
             if (g_dragging < 0) {
                 for (int i = 0; i < SLIDER_COUNT; ++i) g_values.sliders[i] = values->sliders[i];
+                g_values.minTicks = values->minTicks;
                 for (int i = 0; i < TOGGLE_COUNT; ++i) g_values.toggles[i] = values->toggles[i];
                 g_values.sizePercent = values->sizePercent;
                 applyScale(wnd);
@@ -580,7 +612,8 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             float x = logicalX(lParam);
             float y = logicalY(lParam);
             if (g_dragging >= 0) {
-                setSlider(wnd, g_dragging, valueAt(g_dragging, x), false);
+                if (g_dragging == 0 && g_dragMin) setMinTicks(wnd, valueAt(0, x), false);
+                else setSlider(wnd, g_dragging, valueAt(g_dragging, x), false);
                 return 0;
             }
             int hover = hitTest(x, y);
@@ -617,7 +650,16 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 if (std::abs(y - sliderY(i)) <= 16.f && x >= SLIDER_X0 - 12.f && x <= SLIDER_X1 + 12.f) {
                     g_dragging = i;
                     SetCapture(wnd);
-                    setSlider(wnd, i, valueAt(i, x), false);
+                    // Buffer slider: grab whichever handle is closer.
+                    g_dragMin = false;
+                    if (i == 0 && g_values.sliders[0] > 0) {
+                        int lo = std::min(g_values.minTicks, g_values.sliders[0]);
+                        float dMin = std::abs(x - thumbX(0, lo));
+                        float dMax = std::abs(x - thumbX(0, g_values.sliders[0]));
+                        g_dragMin = dMin < dMax || (dMin == dMax && x < thumbX(0, lo));
+                    }
+                    if (g_dragMin) setMinTicks(wnd, valueAt(0, x), false);
+                    else setSlider(wnd, i, valueAt(i, x), false);
                 }
             }
             else if (hit >= HIT_TOGGLE && hit < HIT_TOGGLE + TOGGLE_COUNT) {
@@ -631,6 +673,7 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_LBUTTONUP:
             if (g_dragging >= 0) {
                 g_dragging = -1;
+                g_dragMin = false;
                 ReleaseCapture();
                 save();
                 InvalidateRect(wnd, nullptr, FALSE);

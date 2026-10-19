@@ -377,6 +377,10 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
     double maxMs = static_cast<double>(setting<int64_t>("buffer-ticks")) * 1000.0 / 240.0;
     int limit = std::min(MAX_DELAY_TICKS, msToTicks(maxMs, perTick));
 
+    // Smallest delay allowed (the left handle of the range slider).
+    double minMs = static_cast<double>(setting<int64_t>("buffer-min-ticks")) * 1000.0 / 240.0;
+    int minDelay = std::clamp(msToTicks(minMs, perTick), 1, std::max(1, limit));
+
     bool anyWave = false;
     bool anyMini = false;
     bool anyFlying = false;
@@ -413,7 +417,7 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
     };
 
     // Find the smallest delay that clearly survives longer.
-    for (int delay = 1; delay <= limit && budget > 0; ++delay) {
+    for (int delay = minDelay; delay <= limit && budget > 0; ++delay) {
         auto result = simulate(s, delay, budget);
         if (!survives(result)) continue;
 
