@@ -149,16 +149,46 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
         empty.clear();
         GJBaseGameLayer::collisionCheckObjects(player, &empty, 0, dt);
 
-        for (auto obj : solids) {
-            CCRect box = obj->getObjectRect();
-            if (!player->getObjectRect().intersectsRect(box)) continue;
-            player->collidedWithObject(dt, obj, box, false);
-            if (pb::g_simDied) return;
-        }
+        // Slopes can't be modeled without GD's collision code: unknown, not a death.
         for (auto obj : slopes) {
-            if (!player->getObjectRect().intersectsRect(obj->getObjectRect())) continue;
-            player->collidedWithSlopeInternal(dt, obj, false);
-            if (pb::g_simDied) return;
+            if (player->getObjectRect().intersectsRect(obj->getObjectRect())) {
+                pb::g_simStopped = true;
+                return;
+            }
+        }
+        // Blocks, by plain math: coming down onto a block lands on it, coming
+        // up into one lands on its underside (modes that can ride ceilings),
+        // anything else is a crash. Nothing here calls GD with the block.
+        int gi = pb::ghostIndex(player);
+        float prevY = gi >= 0 ? pb::g_prevPos[gi].y : player->getPositionY();
+        bool flipped = player->m_isUpsideDown;
+        bool ridesCeiling = player->m_isShip || player->m_isBird || player->m_isBall
+            || player->m_isDart || player->m_isSwing || player->m_isSpider;
+        for (auto obj : solids) {
+            CCRect me = player->getObjectRect();
+            CCRect box = obj->getObjectRect();
+            if (!me.intersectsRect(box)) continue;
+            float half = me.size.height / 2.f;
+            float vy = player->m_yVelocity * (flipped ? -1.f : 1.f); // >0 = moving away from "ground"
+            bool fromAbove = prevY - half >= box.getMaxY() - 2.f;
+            bool fromBelow = prevY + half <= box.getMinY() + 2.f;
+            bool movingDown = flipped ? player->m_yVelocity >= 0.f : player->m_yVelocity <= 0.f;
+            (void)vy;
+            if (fromAbove && (flipped ? ridesCeiling : true) && player->m_yVelocity <= 0.f) {
+                player->setPosition({ player->getPositionX(), box.getMaxY() + half });
+                player->m_yVelocity = 0.f;
+                if (!flipped) player->m_isOnGround = true;
+            }
+            else if (fromBelow && (flipped ? true : ridesCeiling) && player->m_yVelocity >= 0.f) {
+                player->setPosition({ player->getPositionX(), box.getMinY() - half });
+                player->m_yVelocity = 0.f;
+                if (flipped) player->m_isOnGround = true;
+            }
+            else {
+                (void)movingDown;
+                pb::g_simDied = true;
+                return;
+            }
         }
 
         CCRect ghostBox = player->getObjectRect();
