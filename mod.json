@@ -8,7 +8,7 @@
 	},
 	"id": "lilwc.input-buffer-lite",
 	"name": "Input Buffer Lite",
-	"version": "v1.5.1",
+	"version": "v1.5.2",
 	"developer": "lilWC",
 	"description": "Input timing tweaks.",
 	"tags": ["gameplay"],
@@ -85,9 +85,9 @@
 		"pb-test": {
 			"type": "string",
 			"name": "PB Test Mode",
-			"description": "Temporary, for finding the PB-not-saving bug. A = buffer works but never runs the prediction. B = runs the prediction but never delays anything. C = always delays presses by 2 ticks with no prediction. Normal = usual behavior.",
+			"description": "Temporary, for finding the PB-not-saving bug. A = buffer works but never runs the prediction. B = runs the prediction but never delays anything. C = always delays presses by 2 ticks with no prediction. D = like B but the ghost skips collision checks. E = like B but the ghost ignores every object. Normal = usual behavior.",
 			"default": "Normal",
-			"one-of": ["Normal", "A", "B", "C"]
+			"one-of": ["Normal", "A", "B", "C", "D", "E"]
 		},
 		"theme": {
 			"type": "string",

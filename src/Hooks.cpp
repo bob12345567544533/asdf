@@ -113,8 +113,8 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
         gd::vector<GameObject*> local;
         auto& filtered = depth == 0 ? shared : local;
         filtered.clear();
+        std::vector<GameObject*> stops;
 
-        CCRect ghostBox = player->getObjectRect();
         int n = std::min<int>(count, static_cast<int>(objects->size()));
         for (int i = 0; i < n; ++i) {
             auto obj = (*objects)[i];
@@ -128,16 +128,26 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
                     filtered.push_back(obj);
                     break;
                 default:
-                    if (pb::stopsSimulation(obj, player) && ghostBox.intersectsRect(obj->getObjectRect())) {
-                        pb::g_simStopped = true;
-                    }
+                    // Checked after GD's own pass below, from cached hitboxes only.
+                    // Asking GD for an ignored object's hitbox here (the original
+                    // mod never does) is what stopped PBs from saving.
+                    if (pb::stopsSimulation(obj, player)) stops.push_back(obj);
                     break;
             }
         }
+        if (pb::g_testMode == 'E') filtered.clear();
 
         depth++;
         GJBaseGameLayer::collisionCheckObjects(player, &filtered, static_cast<int>(filtered.size()), dt);
         depth--;
+
+        CCRect const& ghostBox = player->m_objectRect;
+        for (auto obj : stops) {
+            if (ghostBox.intersectsRect(obj->m_objectRect)) {
+                pb::g_simStopped = true;
+                break;
+            }
+        }
     }
 
     bool canBeActivatedByPlayer(PlayerObject* player, EffectGameObject* object) {

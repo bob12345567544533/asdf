@@ -297,7 +297,7 @@ SimResult simulate(SimSetup const& s, int delay, int& budget) {
             ghosts[i]->m_collisionLogBottom->removeAllObjects();
             ghosts[i]->m_collisionLogLeft->removeAllObjects();
             ghosts[i]->m_collisionLogRight->removeAllObjects();
-            s.layer->checkCollisions(ghosts[i], s.dt, false);
+            if (g_testMode != 'D') s.layer->checkCollisions(ghosts[i], s.dt, false);
             if (g_simDied) return { true, false, step };
             if (g_simStopped) return { false, true, step };
         }
@@ -401,6 +401,8 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
 
     // PB bug hunt. A: no prediction at all. C: fixed 2-tick delay on presses, no prediction.
     auto testMode = Mod::get()->getSettingValue<std::string>("pb-test");
+    g_testMode = testMode.empty() ? 'N' : testMode[0];
+    if (g_testMode == 'D' || g_testMode == 'E') testMode = "B"; // sim variants, never delay
     if (testMode == "A") return false;
     if (testMode == "C") {
         if (!down) return false;
