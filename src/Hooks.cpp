@@ -19,8 +19,6 @@ class $modify(PBPlayLayer, PlayLayer) {
     struct Fields {
         Ref<PlayerObject> ghost1;
         Ref<PlayerObject> ghost2;
-        bool loggedDeath = false;     // PB diagnostics, once per attempt
-        bool loggedAnticheat = false;
 
         ~Fields() {
             pb::clearGhosts(ghost1.data(), ghost2.data());
@@ -37,7 +35,7 @@ class $modify(PBPlayLayer, PlayLayer) {
 
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
         pb::clearQueues();
-        pb::resetTiming();
+        pb::g.tick = 0;
 
         if (!PlayLayer::init(level, useReplay, dontCreateObjects)) return false;
 
@@ -48,29 +46,21 @@ class $modify(PBPlayLayer, PlayLayer) {
         if (auto overlay = pb::BufferOverlay::create()) {
             this->addChild(overlay, 10000);
         }
-        pb::menu::attempt(m_attempts, true);
+        pb::menu::attempt(m_attempts);
         return true;
     }
 
     void resetLevel() {
         pb::clearQueues();
-        pb::resetTiming();
-        int bestBefore = m_level ? m_level->m_normalPercent.value() : -1;
+        pb::g.tick = 0;
         PlayLayer::resetLevel();
-        int bestAfter = m_level ? m_level->m_normalPercent.value() : -1;
-        if (bestAfter != bestBefore) pb::menu::log(fmt::format("restart: best {}>{}", bestBefore, bestAfter));
-        m_fields->loggedDeath = false;
-        m_fields->loggedAnticheat = false;
         pb::menu::attempt(m_attempts);
     }
 
     void onQuit() {
         pb::clearQueues();
         pb::clearGhosts(m_fields->ghost1.data(), m_fields->ghost2.data());
-        int bestBefore = m_level ? m_level->m_normalPercent.value() : -1;
-        auto level = m_level;
         PlayLayer::onQuit();
-        if (level) pb::menu::log(fmt::format("quit: best {}>{}", bestBefore, level->m_normalPercent.value()));
     }
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
@@ -79,40 +69,9 @@ class $modify(PBPlayLayer, PlayLayer) {
             if (pb::isGhost(player)) pb::g_simDied = true;
             return;
         }
-        // PB diagnostics: what GD's save check sees around each death.
-        int bestBefore = m_level ? m_level->m_normalPercent.value() : -1;
-        int practiceBefore = m_level ? m_level->m_practicePercent : -1;
-        bool anticheatHit = object && object == m_anticheatSpike;
-
         PlayLayer::destroyPlayer(player, object);
-
-        if (anticheatHit && !m_fields->loggedAnticheat) {
-            m_fields->loggedAnticheat = true;
-            pb::menu::log("anti-cheat check hit");
-        }
         // Only drop held inputs if you actually died (noclip keeps you alive).
-        if (player && player->m_isDead) {
-            pb::clearQueues();
-            int percent = static_cast<int>(this->getCurrentPercent());
-            pb::menu::death(percent);
-            if (!m_fields->loggedDeath) {
-                m_fields->loggedDeath = true;
-                int bestAfter = m_level ? m_level->m_normalPercent.value() : -1;
-                int practiceAfter = m_level ? m_level->m_practicePercent : -1;
-                pb::menu::log(fmt::format(
-                    "{}% best {}>{} prac {}>{} p{} t{} d{} i{} a{}",
-                    percent, bestBefore, bestAfter, practiceBefore, practiceAfter,
-                    m_isPracticeMode ? 1 : 0, m_isTestMode ? 1 : 0, m_damageVerified ? 1 : 0,
-                    m_passedIntegrity ? 1 : 0, m_fields->loggedAnticheat ? 1 : 0
-                ));
-                pb::menu::log(fmt::format(
-                    "clicks {} jumps {} unc {} | lvl c{} j{} | chk {} L{}",
-                    m_clicks, m_jumps, m_uncommittedJumps,
-                    m_level ? m_level->m_clicks.value() : -1, m_level ? m_level->m_jumps.value() : -1,
-                    m_level && m_level->m_isChkValid ? 1 : 0, m_level && m_level->m_isCompletionLegitimate ? 1 : 0
-                ));
-            }
-        }
+        if (player && player->m_isDead) pb::clearQueues();
     }
 
     void playEndAnimationToPos(CCPoint pos) {
@@ -270,16 +229,6 @@ $on_mod(Loaded) {
         }
     });
 
-    // Turning the buffer off any way (F6, the window, Geode settings) fires
-    // whatever was being held back right away, in order.
-    listenForSettingChanges<bool>("enabled", [](bool enabled) {
-        if (enabled) return;
-        if (auto pl = PlayLayer::get()) {
-            pb::flushChannel(pl, 0);
-            pb::flushChannel(pl, 1);
-        }
-    });
-
     listenForKeybindSettingPresses("menu-key", [](Keybind const&, bool down, bool repeat, double) {
         if (down && !repeat) pb::menu::toggle();
     });
@@ -292,5 +241,4 @@ $on_mod(Loaded) {
 // Open the window when the game starts, like the old console did.
 $on_game(Loaded) {
     if (Mod::get()->getSettingValue<bool>("open-window")) pb::menu::open();
-    else pb::menu::prepare();
 }

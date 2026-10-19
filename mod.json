@@ -8,7 +8,7 @@
 	},
 	"id": "lilwc.input-buffer-lite",
 	"name": "Input Buffer Lite",
-	"version": "v1.4.5",
+	"version": "v1.3.1",
 	"developer": "lilWC",
 	"description": "Input timing tweaks.",
 	"tags": ["gameplay"],
@@ -21,7 +21,7 @@
 		"buffer-ticks": {
 			"type": "int",
 			"name": "Max Ticks",
-			"description": "Largest delay the buffer may add, in 240 TPS ticks (1 tick = 4.17 ms). 0 turns buffering off.",
+			"description": "1 tick = 4.17 ms at 240 TPS.",
 			"default": 2,
 			"min": 0,
 			"max": 24,
@@ -30,7 +30,7 @@
 		"buffer-min-ticks": {
 			"type": "int",
 			"name": "Min Ticks",
-			"description": "Smallest delay the buffer will use. With Min 1 and Max 4 it only delays by 1 to 4 ticks. If Min is above Max, Max is used.",
+			"description": "Smallest delay the buffer will use. With Min 1 and Ticks 4 it only delays by 1 to 4 ticks.",
 			"default": 1,
 			"min": 1,
 			"max": 24,
@@ -39,7 +39,7 @@
 		"randomize": {
 			"type": "int",
 			"name": "Randomize (ticks)",
-			"description": "0 = always use the smallest safe delay (plus 1 tick margin). Above 0 = pick a random safe delay up to this many ticks above the smallest one, keeping the same 1 tick margin. Never goes past Max Ticks.",
+			"description": "0 = always use the smallest safe delay (plus 1 tick margin). Above 0 = pick a random safe delay up to this many ticks above the smallest one.",
 			"default": 0,
 			"min": 0,
 			"max": 24,
@@ -48,7 +48,7 @@
 		"buffer-releases": {
 			"type": "bool",
 			"name": "Releases",
-			"description": "Also buffer early releases for wave and robot (and ship, if Ship is on).",
+			"description": "Wave, ship and robot.",
 			"default": true
 		},
 		"buffer-ship": {
@@ -81,13 +81,6 @@
 			"min": 50,
 			"max": 200,
 			"control": { "arrow-step": 5, "slider-step": 5 }
-		},
-		"theme": {
-			"type": "string",
-			"name": "Window Theme",
-			"description": "Look of the F7 window. You can also switch it from the button in the window's title bar.",
-			"default": "Clean",
-			"one-of": ["Clean", "Terminal", "Compact HUD", "Neon", "Retro GD", "Two-pane", "Analytics", "Big Numbers", "Slate", "Minimal", "Paper", "Nord", "Vaporwave", "Sunset", "Matrix", "Amber CRT", "Dracula", "Ocean", "Noir Gold", "Midnight HUD"]
 		},
 		"display-title": {
 			"type": "title",
