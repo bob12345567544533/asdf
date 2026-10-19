@@ -111,43 +111,55 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
             return GJBaseGameLayer::collisionCheckObjects(player, objects, count, dt);
         }
 
-        static int depth = 0;
-        static gd::vector<GameObject*> shared;
-        gd::vector<GameObject*> local;
-        auto& filtered = depth == 0 ? shared : local;
-        filtered.clear();
+        // GD's own collision pass is never used for ghosts: it records every
+        // block and spike a ghost touches in the level's bookkeeping for the
+        // real player, and then won't save your PB. Instead the ghost reacts
+        // to blocks and slopes through its own player physics, spikes are
+        // checked by hand, and GD's pass only gets an empty list.
+        std::vector<GameObject*> solids;
+        std::vector<GameObject*> slopes;
         std::vector<GameObject*> stops;
         std::vector<GameObject*> hazards;
 
         int n = std::min<int>(count, static_cast<int>(objects->size()));
         for (int i = 0; i < n; ++i) {
             auto obj = (*objects)[i];
-            if (!obj) continue;
+            if (!obj || obj->m_isGroupDisabled) continue;
             switch (obj->m_objectType) {
                 case GameObjectType::Hazard:
                 case GameObjectType::AnimatedHazard:
-                    // Never hand spikes to GD for a ghost: GD's hazard handling
-                    // remembers the touch, and a ghost that "touched a spike and
-                    // lived" makes GD throw away the PB. Checked by hand below.
-                    if (pb::g_testMode == 'G') filtered.push_back(obj);
-                    else if (!obj->m_isGroupDisabled) hazards.push_back(obj);
+                    hazards.push_back(obj);
                     break;
                 case GameObjectType::Solid:
+                    solids.push_back(obj);
+                    break;
                 case GameObjectType::Slope:
+                    slopes.push_back(obj);
+                    break;
                 case GameObjectType::CollisionObject:
-                    if (pb::g_testMode != 'G') filtered.push_back(obj);
                     break;
                 default:
-                    // Portals/pads/orbs: checked after GD's pass, from cached hitboxes.
+                    // Portals/pads/orbs: checked below, from cached hitboxes.
                     if (pb::stopsSimulation(obj, player)) stops.push_back(obj);
                     break;
             }
         }
-        if (pb::g_testMode == 'E') filtered.clear();
 
-        depth++;
-        GJBaseGameLayer::collisionCheckObjects(player, &filtered, static_cast<int>(filtered.size()), dt);
-        depth--;
+        static gd::vector<GameObject*> empty;
+        empty.clear();
+        GJBaseGameLayer::collisionCheckObjects(player, &empty, 0, dt);
+
+        for (auto obj : solids) {
+            CCRect box = obj->getObjectRect();
+            if (!player->getObjectRect().intersectsRect(box)) continue;
+            player->collidedWithObject(dt, obj, box, false);
+            if (pb::g_simDied) return;
+        }
+        for (auto obj : slopes) {
+            if (!player->getObjectRect().intersectsRect(obj->getObjectRect())) continue;
+            player->collidedWithSlopeInternal(dt, obj, false);
+            if (pb::g_simDied) return;
+        }
 
         CCRect ghostBox = player->getObjectRect();
         for (auto obj : hazards) {
@@ -175,6 +187,12 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
                 break;
             }
         }
+    }
+
+    // Ghost landings/jumps must not fire the level's event triggers.
+    void gameEventTriggered(GJGameEvent event, int material, int playerID) {
+        if (pb::g_simulating) return;
+        GJBaseGameLayer::gameEventTriggered(event, material, playerID);
     }
 
     bool canBeActivatedByPlayer(PlayerObject* player, EffectGameObject* object) {
