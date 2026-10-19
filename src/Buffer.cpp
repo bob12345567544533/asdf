@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <random>
 #include <vector>
 #include <sstream>
@@ -458,8 +459,18 @@ void setHeld(PlayerObject* ghost, int index, bool held) {
     g_simHeld[index] = held;
 }
 
+// Copies a value at a raw byte offset of a PlayerObject. These are the exact
+// fields (by GD memory position) the original Predictive Input Buffer copies
+// onto its ghost, so the setup matches it byte for byte.
+template <class T>
+void copyRaw(PlayerObject* to, PlayerObject* from, size_t offset) {
+    std::memcpy(reinterpret_cast<char*>(to) + offset, reinterpret_cast<char const*>(from) + offset, sizeof(T));
+}
+
 // Copies the real players onto the hidden ghosts, applies the input after
 // `delay` steps, and runs the game's own physics and collision forward.
+// Mirrors the original mod's simulation step for step: same setup calls and
+// copied fields, and per step: input, update, rotation, collision check.
 // `budget` is decreased by the number of steps used.
 SimResult simulate(SimSetup const& s, int delay, int& budget) {
     SimGuard guard;
@@ -469,29 +480,22 @@ SimResult simulate(SimSetup const& s, int delay, int& budget) {
         auto ghost = g.ghosts[i];
         auto real = s.reals[i];
 
-        // Copy the state with plain field writes. Helper functions like
-        // spawnFromPlayer also run gravity-flip, velocity-change and visibility
-        // logic, which can leave traces on the real level.
+        ghost->setVisible(false);
         ghost->copyAttributes(real);
-        ghost->setPosition(real->getPosition());
         ghost->setRotation(real->getRotation());
-        ghost->m_yVelocity = real->m_yVelocity;
-        ghost->m_fallSpeed = real->m_fallSpeed;
-        ghost->m_isUpsideDown = real->m_isUpsideDown;
-        ghost->m_isOnGround = real->m_isOnGround;
-        ghost->m_isOnSlope = real->m_isOnSlope;
-        ghost->m_wasOnSlope = real->m_wasOnSlope;
-        ghost->m_vehicleSize = real->m_vehicleSize;
-        ghost->m_playerSpeed = real->m_playerSpeed;
-        ghost->m_gravityMod = real->m_gravityMod;
-        ghost->m_isPlatformer = real->m_isPlatformer;
-        ghost->m_holdingLeft = real->m_holdingLeft;
-        ghost->m_holdingRight = real->m_holdingRight;
-        ghost->m_platformerXVelocity = real->m_platformerXVelocity;
+        ghost->setPosition(real->getPosition());
+        copyRaw<float>(ghost, real, 0x2fc);
+        copyRaw<float>(ghost, real, 0x300);
+        copyRaw<float>(ghost, real, 0xb84);
+        copyRaw<bool>(ghost, real, 0x9c1);
+        copyRaw<bool>(ghost, real, 0x9bf);
+        copyRaw<float>(ghost, real, 0x9f0);
+        copyRaw<float>(ghost, real, 0x9f4);
 
-        // Ghosts get reused, so set the button to what the real player is doing
-        // right now: up if this input is a press, held if it's a release.
-        setHeld(ghost, static_cast<int>(i), !s.down);
+        // Delayed runs: the button starts the way the real player has it now
+        // (up before a press, held before a release).
+        if (delay > 0) setHeld(ghost, static_cast<int>(i), !s.down);
+        else g_simHeld[i] = !s.down;
 
         ghosts[i] = ghost;
     }
@@ -504,18 +508,6 @@ SimResult simulate(SimSetup const& s, int delay, int& budget) {
         // Out of time: count it as a death so an unchecked delay never gets used.
         if (--budget < 0) return { true, false, -1 };
 
-        for (size_t i = 0; i < s.count; ++i) {
-            ghosts[i]->m_collisionLogTop->removeAllObjects();
-            ghosts[i]->m_collisionLogBottom->removeAllObjects();
-            ghosts[i]->m_collisionLogLeft->removeAllObjects();
-            ghosts[i]->m_collisionLogRight->removeAllObjects();
-            s.layer->checkCollisions(ghosts[i], s.dt, false);
-            if (g_simDied) return { true, false, step };
-            if (g_simStopped) return { false, true, step };
-        }
-
-        // Pressing after the collision pass matches how the game applies a
-        // fresh input (it gives the shorter first jump, like the real thing).
         if (step == delay) {
             for (size_t i = 0; i < s.count; ++i) setHeld(ghosts[i], static_cast<int>(i), s.down);
         }
@@ -526,11 +518,21 @@ SimResult simulate(SimSetup const& s, int delay, int& budget) {
         }
         if (g_simDied) return { true, false, step };
 
+        for (size_t i = 0; i < s.count; ++i) {
+            ghosts[i]->m_collisionLogTop->removeAllObjects();
+            ghosts[i]->m_collisionLogBottom->removeAllObjects();
+            ghosts[i]->m_collisionLogLeft->removeAllObjects();
+            ghosts[i]->m_collisionLogRight->removeAllObjects();
+            s.layer->checkCollisions(ghosts[i], s.dt, false);
+            if (g_simDied) return { true, false, step };
+            if (g_simStopped) return { false, true, step };
+        }
+
         // Far enough past the input that the verdict can't change any more.
         if (s.decideAfter >= 0 && delay > 0 && step - delay >= s.decideAfter) return { false, false, step };
 
         // Jumped, then landed and stayed on the ground: that's a safe outcome.
-        if (s.earlyExit && step > delay) {
+        if (s.earlyExit && step >= delay) {
             bool allGrounded = true;
             for (size_t i = 0; i < s.count; ++i) {
                 if (!ghosts[i]->m_isOnGround) allGrounded = false;

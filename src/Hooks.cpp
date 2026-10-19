@@ -183,15 +183,6 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
         if (pb::g_simulating) return;
         GJBaseGameLayer::playerTouchedRing(player, ring);
     }
-
-    void flipGravity(PlayerObject* player, bool flip, bool noEffects) {
-        if (pb::g_simulating) {
-            // Keep the physics, skip everything else.
-            if (player) player->m_isUpsideDown = flip;
-            return;
-        }
-        GJBaseGameLayer::flipGravity(player, flip, noEffects);
-    }
 };
 
 class $modify(PBPlayerObject, PlayerObject) {

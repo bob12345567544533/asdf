@@ -1,3 +1,6 @@
+# v1.4.8
+- PB fix: the ghost simulation now mirrors the original Predictive Input Buffer exactly (same setup, same copied fields, same step order) and no longer hooks gravity flips.
+
 # v1.4.6
 - PB fix attempt: GD's anti-cheat and progress flags are snapshotted before every ghost run and restored after.
 - Ghosts collide with collision blocks again, like the original mod.

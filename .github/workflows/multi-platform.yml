@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - "**"
+      - lite
 
 # A newer push to the same branch replaces the running build.
 concurrency:
@@ -17,23 +17,10 @@ jobs:
       fail-fast: false
       matrix:
         config:
+        # Windows only: it's the only platform this mod is used on, and the
+        # macOS runners cost 10x the build minutes.
         - name: Windows
           os: windows-latest
-
-        - name: macOS
-          os: macos-latest
-
-        - name: iOS
-          os: macos-latest
-          target: iOS
-
-        - name: Android32
-          os: ubuntu-latest
-          target: Android32
-
-        - name: Android64
-          os: ubuntu-latest
-          target: Android64
 
     name: ${{ matrix.config.name }}
     runs-on: ${{ matrix.config.os }}
