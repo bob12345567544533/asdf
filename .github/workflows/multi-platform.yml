@@ -44,6 +44,9 @@ jobs:
           # Locked to a known-good bindings commit for GD 2.2081. Newer commits
           # on bindings main are mostly for 2.2091 and broke the build.
           bindings-ref: d3a81aa011a4c2cc4a406d30321cd68d21ca9a80
+          # Build the code generator from those bindings instead of downloading
+          # the newest prebuilt one, which expects a newer Geode SDK than 5.11.2.
+          configure-args: -DSKIP_BUILDING_CODEGEN=OFF
 
   package:
     name: Package builds
