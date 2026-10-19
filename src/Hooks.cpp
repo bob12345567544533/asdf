@@ -19,6 +19,8 @@ class $modify(PBPlayLayer, PlayLayer) {
     struct Fields {
         Ref<PlayerObject> ghost1;
         Ref<PlayerObject> ghost2;
+        bool loggedDeath = false;     // PB diagnostics, once per attempt
+        bool loggedAnticheat = false;
 
         ~Fields() {
             pb::clearGhosts(ghost1.data(), ghost2.data());
@@ -54,6 +56,8 @@ class $modify(PBPlayLayer, PlayLayer) {
         pb::clearQueues();
         pb::resetTiming();
         PlayLayer::resetLevel();
+        m_fields->loggedDeath = false;
+        m_fields->loggedAnticheat = false;
         pb::menu::attempt(m_attempts);
     }
 
@@ -69,11 +73,33 @@ class $modify(PBPlayLayer, PlayLayer) {
             if (pb::isGhost(player)) pb::g_simDied = true;
             return;
         }
+        // PB diagnostics: what GD's save check sees around each death.
+        int bestBefore = m_level ? m_level->m_normalPercent.value() : -1;
+        int practiceBefore = m_level ? m_level->m_practicePercent : -1;
+        bool anticheatHit = object && object == m_anticheatSpike;
+
         PlayLayer::destroyPlayer(player, object);
+
+        if (anticheatHit && !m_fields->loggedAnticheat) {
+            m_fields->loggedAnticheat = true;
+            pb::menu::log("anti-cheat check hit");
+        }
         // Only drop held inputs if you actually died (noclip keeps you alive).
         if (player && player->m_isDead) {
             pb::clearQueues();
-            pb::menu::death(static_cast<int>(this->getCurrentPercent()));
+            int percent = static_cast<int>(this->getCurrentPercent());
+            pb::menu::death(percent);
+            if (!m_fields->loggedDeath) {
+                m_fields->loggedDeath = true;
+                int bestAfter = m_level ? m_level->m_normalPercent.value() : -1;
+                int practiceAfter = m_level ? m_level->m_practicePercent : -1;
+                pb::menu::log(fmt::format(
+                    "{}% best {}>{} prac {}>{} p{} t{} d{} i{} a{}",
+                    percent, bestBefore, bestAfter, practiceBefore, practiceAfter,
+                    m_isPracticeMode ? 1 : 0, m_isTestMode ? 1 : 0, m_damageVerified ? 1 : 0,
+                    m_passedIntegrity ? 1 : 0, m_fields->loggedAnticheat ? 1 : 0
+                ));
+            }
         }
     }
 
