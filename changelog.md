@@ -1,3 +1,7 @@
+# v1.4.6
+- PB fix attempt: GD's anti-cheat and progress flags are snapshotted before every ghost run and restored after.
+- Ghosts collide with collision blocks again, like the original mod.
+
 # v1.4.5
 - PB fix attempt: removed the v1.4.0 hooks on GD's event/spawn/toggle functions (the original mod never had them).
 
