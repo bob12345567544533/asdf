@@ -33,12 +33,6 @@ class $modify(PBPlayLayer, PlayLayer) {
         return ghost;
     }
 
-    static void onModify(auto& self) {
-        // Run first, so ghost deaths are caught before other mods' noclip or
-        // death-counter hooks can swallow or count them.
-        (void)self.setHookPriorityPre("PlayLayer::destroyPlayer", Priority::First);
-    }
-
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
         pb::clearQueues();
         pb::resetTiming();

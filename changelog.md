@@ -1,3 +1,6 @@
+# v1.4.1
+- Fixed PBs not saving: the death hook runs in its normal order again (v1.4.0 forced it to run before other mods').
+
 # v1.4.0
 - Every theme shows the time on each log line.
 - 20 window themes: Clean, Terminal, Compact HUD, Neon, Retro GD, Two-pane, Analytics, Big Numbers, Slate, Minimal, Paper (light), Nord, Vaporwave, Sunset, Matrix, Amber CRT, Dracula, Ocean, Noir Gold and Midnight HUD. Switch from the button in the window's title bar (hover a name for a live preview) or the new Window Theme setting.
@@ -6,7 +9,6 @@
 - Min Gain now counts from when the delayed input goes in, so a delay that only postpones a death no longer counts as a save. Same for reaching a portal or pad before the delayed input fires.
 - Randomize keeps the same 1 tick safety margin as the normal pick.
 - Ghost runs can no longer set off Event triggers or spawn groups in the real level.
-- Ghost deaths are caught before other mods' noclip or death hooks see them.
 - Speed portals stop the simulation instead of being run past at the old speed.
 - Step size tracking resets on respawn and time warp changes.
 - Turning the buffer off from the window or Geode settings fires held inputs right away, like F6.
