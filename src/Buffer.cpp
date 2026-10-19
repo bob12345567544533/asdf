@@ -118,6 +118,19 @@ static bool touchingRing(PlayerObject* p) {
 }
 
 bool stopsSimulation(GameObject* object, PlayerObject* ghost) {
+    // Speed portals change how fast the player moves, which the ghost can't
+    // follow (they're told apart by object ID). Only stop if the speed changes.
+    float speed = 0.f;
+    switch (object->m_objectID) {
+        case 200: speed = 0.7f; break;  // slow
+        case 201: speed = 0.9f; break;  // normal
+        case 202: speed = 1.1f; break;  // fast
+        case 203: speed = 1.3f; break;  // faster
+        case 1334: speed = 1.6f; break; // fastest
+        default: break;
+    }
+    if (speed > 0.f) return !ghost || std::abs(ghost->m_playerSpeed - speed) > 0.01f;
+
     switch (object->m_objectType) {
         // Portals, pads and teleports act on contact.
         case GameObjectType::InverseGravityPortal:
@@ -199,6 +212,9 @@ struct SimSetup {
     int horizon = 48;
     float dt = 0.25f;
     bool earlyExit = false; // grounded modes: a safe landing counts as survived
+    // Delayed runs only: once this many steps pass after the input without a
+    // death, the delay is safe whatever happens next, so the run can stop.
+    int decideAfter = -1;
 };
 
 void setHeld(PlayerObject* ghost, int index, bool held) {
@@ -275,6 +291,9 @@ SimResult simulate(SimSetup const& s, int delay, int& budget) {
         }
         if (g_simDied) return { true, false, step };
 
+        // Far enough past the input that the verdict can't change any more.
+        if (s.decideAfter >= 0 && delay > 0 && step - delay >= s.decideAfter) return { false, false, step };
+
         // Jumped, then landed and stayed on the ground: that's a safe outcome.
         if (s.earlyExit && step > delay) {
             bool allGrounded = true;
@@ -314,7 +333,24 @@ void flushChannel(PlayLayer* layer, int channel) {
     for (auto const& input : pending) fire(layer, input);
 }
 
+void resetTiming() {
+    g.tick = 0;
+    g.recentDts.fill(0.f);
+    g.recentDtIndex = 0;
+    g.lastStepDt = 0.25f;
+    g.lastWarp = 0.f; // re-read on the next step
+}
+
 void onStep(PlayLayer* layer, float dt) {
+    // A time warp change changes the step size: forget the old sizes right away
+    // instead of carrying them for the next 16 steps.
+    float warp = layer->m_gameState.m_timeWarp;
+    if (warp != g.lastWarp) {
+        g.recentDts.fill(0.f);
+        g.recentDtIndex = 0;
+        g.lastWarp = warp;
+    }
+
     // The game sometimes splits a step in two around an input. Use the biggest
     // recent step as the "full" step size so a half step doesn't skew anything.
     g.recentDts[g.recentDtIndex] = dt;
@@ -394,15 +430,19 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
     bool anyFlying = false;
     Mode mainMode = modeOf(s.reals[0]);
 
+    bool releaseCares = false;
     for (size_t i = 0; i < s.count; ++i) {
         auto p = s.reals[i];
         Mode mode = modeOf(p);
-        if (!down && (!bufferReleases || !releaseMatters(mode))) return false;
         if (mode == Mode::Ship && !bufferShip) return false;
+        releaseCares |= releaseMatters(mode);
         anyWave |= mode == Mode::Wave;
         anyMini |= p->m_vehicleSize < 1.f;
         anyFlying |= isFlyingMode(mode);
     }
+    // Releases: only when some player's mode cares when you let go (in dual,
+    // wave + cube still counts because of the wave).
+    if (!down && (!bufferReleases || !releaseCares)) return false;
     if (limit <= 0) return false;
 
     double lookAheadMs = anyWave ? setting<double>("wave-look-ahead-ms") : setting<double>("look-ahead-ms");
@@ -420,9 +460,18 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
     auto base = simulate(s, 0, budget);
     if (!base.died) return false;
 
-    auto survives = [&](SimResult const& r) {
-        return !r.died || r.steps - base.steps >= minGain;
+    // A delay is safe when, counted from the moment the input goes in, the
+    // ghost lives through the look-ahead, reaches a portal/pad/orb no sooner
+    // than it would have died, or dies at least Min Gain later than it does
+    // now. (Counting from the start of the run would give every delay free
+    // credit for itself, so a delay that only postpones the death would pass.)
+    auto survives = [&](SimResult const& r, int delay) {
+        int afterPress = r.steps - delay;
+        if (r.stopped) return afterPress > 0 && afterPress >= base.steps;
+        if (!r.died) return true;
+        return afterPress - base.steps >= minGain;
     };
+    s.decideAfter = base.steps + minGain;
 
     // --- delay search ---
     // 0 = old deterministic behavior. >0 = randomly pick a safe delay within
@@ -436,7 +485,7 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
     auto simAt = [&](int delaySteps, SimResult& out) -> bool {
         if (budget <= 0) return false;
         out = simulate(s, delaySteps, budget);
-        return survives(out);
+        return survives(out, delaySteps);
     };
 
     // Ascending scan, collecting every safe delay. `safe` stays sorted and
@@ -453,6 +502,11 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
             if (first < 0) first = d;
             safe.push_back(d);
             safeResults.push_back(r);
+        }
+        else if ((r.died && r.steps < d) || (r.stopped && r.steps <= d)) {
+            // The run ended before its input even went in. Every longer delay
+            // follows the same path up to here and ends the same way.
+            break;
         }
 
         if (first >= 0) {
@@ -485,9 +539,12 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
     if (slider <= 0 || safe.size() <= 1) {
         chosen = oldPick();
     } else {
-        std::uniform_int_distribution<size_t> dist(0, safe.size() - 1);
+        // Keep the same 1-step safety margin as the normal pick: skip the
+        // smallest safe delay when the one right above it is safe too.
+        size_t lo = (safe.size() >= 2 && safe[1] == first + 1) ? 1 : 0;
+        std::uniform_int_distribution<size_t> dist(lo, safe.size() - 1);
         chosen = safe[dist(bufRng())];
-        randomPick = true;
+        randomPick = safe.size() - lo > 1; // more than one option to pick from
     }
 
     SimResult const& result =
@@ -501,7 +558,7 @@ bool onButton(PlayLayer* layer, bool down, int button, bool isPlayer1) {
         log::info(
             "{} buffered by {} steps ({:.2f}ms, {}): dies after {} steps now, {} after delay",
             down ? "Press" : "Release", chosen, earlyMs, modeName(mainMode), base.steps,
-            result.died ? fmt::format("{}", result.steps) : std::string(result.stopped ? "reaches a portal/pad/orb" : "survives")
+            result.died ? fmt::format("{}", result.steps) : std::string(result.stopped ? "reaches a portal/pad/orb" : "is safe")
         );
     }
     if (auto overlay = BufferOverlay::get(layer)) {

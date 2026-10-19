@@ -138,6 +138,46 @@ constexpr Theme THEMES[] {
       Kind::Lines, 454.f, 612.f, 0.f, 3,
       { 0x121212, 0x121212, 0x1a1a1a, 0x2a2a2a, 0xececec, 0x9a9a9a, 0x8a8a8a, 0x333333,
         0xececec, 0xececec, 0xececec, 0x121212, 0xff6b6b, 0x8a8a8a, 0x1e1e1e } },
+    { "Paper", L"Paper", L"Light mode: white cards on warm gray.",
+      Kind::Clean, 454.f, 612.f, 6.f, 2,
+      { 0xf3f3f1, 0xffffff, 0xececea, 0xd6d6d2, 0x1d1d1f, 0x6b6b6b, 0x8c8c8c, 0xd9d9d6,
+        0x1d1d1f, 0x1d1d1f, 0x2f9e44, 0xffffff, 0xd64545, 0x6b6b6b, 0xd6d6d2 } },
+    { "Nord", L"Nord", L"Cool arctic blues.",
+      Kind::Clean, 454.f, 612.f, 6.f, 2,
+      { 0x2e3440, 0x3b4252, 0x434c5e, 0x242933, 0xeceff4, 0xa3abbd, 0x8790a3, 0x4c566a,
+        0x88c0d0, 0xeceff4, 0x88c0d0, 0x2e3440, 0xbf616a, 0xb48ead, 0x4c566a } },
+    { "Vaporwave", L"Vaporwave", L"Purple night with hot pink and cyan glow.",
+      Kind::Neon, 454.f, 612.f, 10.f, 2,
+      { 0x1a0f2e, 0x241640, 0x2e1c52, 0x3a2560, 0xf5e9ff, 0xb49ad6, 0x8a72b0, 0x3a2860,
+        0xff4fd8, 0xf5e9ff, 0xff4fd8, 0x1a0f2e, 0x4fe3ff, 0x4fe3ff, 0x3a2560 } },
+    { "Sunset", L"Sunset", L"Warm dark with orange glow.",
+      Kind::Neon, 454.f, 612.f, 10.f, 2,
+      { 0x1f1418, 0x2a1b20, 0x352229, 0x3d2830, 0xffece0, 0xc79a8c, 0x9a7468, 0x45302f,
+        0xff7b39, 0xffece0, 0xff7b39, 0x1f1418, 0xffcf4a, 0xc79a8c, 0x3d2830 } },
+    { "Matrix", L"Matrix", L"Green phosphor on pure black.",
+      Kind::Terminal, 454.f, 600.f, 0.f, 1,
+      { 0x000000, 0x000000, 0x0a140a, 0x0f2a0f, 0x9dff9d, 0x3fa83f, 0x2b7a2b, 0x154015,
+        0x39ff14, 0x39ff14, 0x39ff14, 0x000000, 0xeaffea, 0x9dff9d, 0x0f2a0f } },
+    { "Amber CRT", L"Amber CRT", L"Old amber monitor terminal.",
+      Kind::Terminal, 454.f, 600.f, 0.f, 1,
+      { 0x120b02, 0x120b02, 0x1e1405, 0x3a2708, 0xffb000, 0xb07a10, 0x7a560c, 0x4a3410,
+        0xffb000, 0xffb000, 0xffb000, 0x120b02, 0xff5a36, 0xffd57a, 0x3a2708 } },
+    { "Dracula", L"Dracula", L"Dark purple with neon pastels.",
+      Kind::Slate, 454.f, 612.f, 10.f, 2,
+      { 0x282a36, 0x343746, 0x3c3f51, 0x191a21, 0xf8f8f2, 0xa6accd, 0x6272a4, 0x44475a,
+        0xbd93f9, 0x282a36, 0xbd93f9, 0x282a36, 0xff5555, 0x50fa7b, 0x44475a } },
+    { "Ocean", L"Ocean", L"Deep sea blue with teal.",
+      Kind::Slate, 454.f, 612.f, 10.f, 2,
+      { 0x0b1f2a, 0x12303f, 0x18394a, 0x07141b, 0xe3f6fb, 0x8fb4c2, 0x6a8f9e, 0x1f4b5e,
+        0x2ec4b6, 0x0b1f2a, 0x2ec4b6, 0x0b1f2a, 0xff6f61, 0x7fdbff, 0x1f4b5e } },
+    { "Noir Gold", L"Noir Gold", L"Minimal lines in black and gold.",
+      Kind::Lines, 454.f, 612.f, 0.f, 3,
+      { 0x0c0c0c, 0x0c0c0c, 0x161410, 0x3a3220, 0xf0e6cc, 0xa89a78, 0x8a7d5e, 0x2e2818,
+        0xd4af37, 0xd4af37, 0xd4af37, 0x0c0c0c, 0xe0533c, 0xa89a78, 0x1c1912 } },
+    { "Midnight HUD", L"Midnight HUD", L"Compact HUD in midnight purple.",
+      Kind::Hud, 300.f, 560.f, 6.f, 2,
+      { 0x0f0f1a, 0x1a1a2e, 0x23233d, 0x07070f, 0xececff, 0x9a9ac0, 0x7a7aa0, 0x2e2e4a,
+        0xececff, 0xffffff, 0x8b7bff, 0x0f0f1a, 0xff6b9a, 0xffd36b, 0x3a3a5a } },
 };
 constexpr int THEME_COUNT = static_cast<int>(sizeof(THEMES) / sizeof(THEMES[0]));
 
@@ -751,9 +791,13 @@ struct Geo {
 
 Geo g_geo;
 
+// Two columns of themes.
+constexpr int MENU_ROWS = (THEME_COUNT + 1) / 2;
+
 RectF menuItem(int i) {
     auto const& m = g_geo.menu;
-    return RectF(m.X + 4.f, m.Y + 6.f + i * g_geo.itemH, m.Width - 8.f, g_geo.itemH);
+    float colW = (m.Width - 8.f) / 2.f;
+    return RectF(m.X + 4.f + (i / MENU_ROWS) * colW, m.Y + 6.f + (i % MENU_ROWS) * g_geo.itemH, colW, g_geo.itemH);
 }
 
 float barWidth() { return (g_geo.bars.Width - (BUCKETS - 1) * 2.f) / BUCKETS; }
@@ -998,9 +1042,9 @@ void computeGeo(Theme const& t) {
 
     // The theme list drops down under its button, kept inside the window.
     G.itemH = t.kind == Kind::Retro ? 30.f : 28.f;
-    float mw = 204.f;
+    float mw = std::min(W - 16.f, 348.f);
     float mx = std::clamp(G.themeBtn.X + G.themeBtn.Width - mw, 8.f, W - 8.f - mw);
-    G.menu = box(mx, G.themeBtn.Y + G.themeBtn.Height + 4.f, mw, 12.f + G.itemH * THEME_COUNT);
+    G.menu = box(mx, G.themeBtn.Y + G.themeBtn.Height + 4.f, mw, 12.f + G.itemH * MENU_ROWS);
 
     g_geo = G;
 }
@@ -1713,7 +1757,7 @@ void paintNeon(gp::Graphics& g, Theme const& t) {
         float dx = r.X + r.Width - 18.f;
         float dy = r.Y + r.Height / 2.f;
         if (on) circle(g, dx, dy, 7.f, col(c.accent, 50));
-        circle(g, dx, dy, 4.f, col(on ? c.accent : 0x2c3846));
+        circle(g, dx, dy, 4.f, col(on ? c.accent : mix(c.panel, c.muted, 0.3f)));
     }
 
     card(g, t, G.logCard);
@@ -2112,6 +2156,63 @@ void paintLines(gp::Graphics& g, Theme const& t) {
 }
 
 // The theme list.
+void paintScene(gp::Graphics& g);
+
+// Live thumbnail of a theme, drawn next to (or under) the theme list.
+void paintPreview(gp::Graphics& g, Theme const& t, int index) {
+    Theme const& p = THEMES[index];
+    RectF m = g_geo.menu;
+    float leftRoom = m.X - 16.f;
+    float belowRoom = t.h - (m.Y + m.Height) - 12.f;
+    float s;
+    float x;
+    float y;
+    if (leftRoom >= 160.f) {
+        s = std::min({ leftRoom / p.w, (t.h - m.Y - 8.f) / p.h, 0.6f });
+        x = m.X - 8.f - p.w * s;
+        y = m.Y;
+    }
+    else if (belowRoom >= 110.f) {
+        s = std::min({ (t.w - 16.f) / p.w, belowRoom / p.h, 0.6f });
+        x = (t.w - p.w * s) / 2.f;
+        y = m.Y + m.Height + 8.f;
+    }
+    else {
+        return;
+    }
+    float pw = p.w * s;
+    float ph = p.h * s;
+    int bw = static_cast<int>(std::lround(pw * g_scale));
+    int bh = static_cast<int>(std::lround(ph * g_scale));
+    if (bw < 16 || bh < 16) return;
+
+    // Paint the other theme off-screen with its own layout, then put everything back.
+    Geo savedGeo = g_geo;
+    int savedShown = g_shown;
+    float savedScale = g_scale;
+    int savedHover = g_hover;
+    g_shown = index;
+    computeGeo(p);
+    g_scale = savedScale * s;
+    g_menuOpen = false;
+    g_hover = HIT_NONE;
+    gp::Bitmap bmp(bw, bh, PixelFormat32bppARGB);
+    {
+        gp::Graphics pg(&bmp);
+        paintScene(pg);
+    }
+    g_geo = savedGeo;
+    g_shown = savedShown;
+    g_scale = savedScale;
+    g_hover = savedHover;
+    g_menuOpen = true;
+
+    RectF r = box(x, y, pw, ph);
+    fill(g, box(x + 2, y + 6, pw, ph), col(0x000000, 70), 6.f);
+    g.DrawImage(&bmp, r);
+    stroke(g, r, col(mix(t.c.border, t.c.text, 0.35f)));
+}
+
 void paintMenu(gp::Graphics& g, Theme const& t) {
     auto const& G = g_geo;
     auto const& c = t.c;
@@ -2142,19 +2243,24 @@ void paintMenu(gp::Graphics& g, Theme const& t) {
         stroke(g, sw, col(mix(panel, c.text, 0.3f)), srad);
         circle(g, sw.X + 8, sw.Y + 8, 4.f, col(item.c.accent));
 
-        RectF label = box(r.X + 32, r.Y, r.Width - 56, r.Height);
+        // Narrow windows (HUD): smaller text so long names still fit.
+        bool narrow = r.Width < 160.f;
+        RectF label = box(r.X + 30, r.Y, r.Width - (current ? 50.f : 34.f), r.Height);
         uint32_t tc = current || h ? c.text : mix(c.text, c.muted, 0.4f);
         switch (t.kind) {
-            case Kind::Terminal: text(g, lower(item.name), Face::Mono, 12.f, col(tc), label); break;
-            case Kind::Lines: spaced(g, upper(item.name), Face::Semi, 10.f, col(tc), label, 1.5f); break;
-            case Kind::Retro: shadowed(g, item.name, Face::Display, 14.f, col(0xffffff), label, A_LEFT, 1.5f); break;
-            default: text(g, item.name, current ? Face::Semi : Face::Ui, 13.f, col(tc), label); break;
+            case Kind::Terminal: text(g, lower(item.name), Face::Mono, narrow ? 11.f : 12.f, col(tc), label); break;
+            case Kind::Lines: text(g, upper(item.name), Face::Semi, narrow ? 10.f : 11.f, col(tc), label); break;
+            case Kind::Retro: shadowed(g, item.name, Face::Display, narrow ? 13.f : 14.f, col(0xffffff), label, A_LEFT, 1.5f); break;
+            default: text(g, item.name, current ? Face::Semi : Face::Ui, narrow ? 12.f : 13.f, col(tc), label); break;
         }
         if (current) {
             uint32_t mark = retro ? c.fill : c.accent;
             checkMark(g, r.X + r.Width - 14.f, r.Y + r.Height / 2.f, col(mark), 4.5f, 2.f);
         }
     }
+
+    int preview = within(g_hover, HIT_MENU, THEME_COUNT) ? g_hover - HIT_MENU : g_menuKey;
+    if (preview >= 0 && preview < THEME_COUNT) paintPreview(g, t, preview);
 }
 
 // The whole window for the current theme, in logical pixels.
@@ -2486,8 +2592,6 @@ int sliderTarget(int slider, float x) {
     return (dl < dh || (dl == dh && x < thumbX(0, lo))) ? T_MIN : T_MAX;
 }
 
-float g_lastX = 0.f; // last mouse x in logical pixels
-
 float logicalX(LPARAM lParam) { return GET_X_LPARAM(lParam) / g_scale; }
 float logicalY(LPARAM lParam) { return GET_Y_LPARAM(lParam) / g_scale; }
 
@@ -2614,7 +2718,6 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_MOUSEMOVE: {
             float x = logicalX(lParam);
             float y = logicalY(lParam);
-            g_lastX = x;
             if (g_menuOpen) KillTimer(wnd, TIMER_MENU);
             if (g_dragging >= 0) {
                 dragTo(wnd, x);
@@ -2731,11 +2834,16 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             int steps = g_wheel / WHEEL_DELTA;
             g_wheel -= steps * WHEEL_DELTA;
             if (steps == 0) return 0;
-            // Only scrolling over a slider or a number changes it.
+            // Only scrolling over a slider or a number changes it. Hit test where
+            // the wheel event happened (screen coordinates), not the last hover.
+            POINT pt { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+            ScreenToClient(wnd, &pt);
+            float x = pt.x / g_scale;
+            int hit = hitTest(x, pt.y / g_scale);
             int target = -1;
-            if (within(g_hover, HIT_SLIDER, SLIDER_COUNT)) target = sliderTarget(g_hover - HIT_SLIDER, g_lastX);
-            else if (within(g_hover, HIT_TARGET, TARGET_COUNT)) target = g_hover - HIT_TARGET;
-            else if (within(g_hover, HIT_STEP, TARGET_COUNT * 2)) target = (g_hover - HIT_STEP) / 2;
+            if (within(hit, HIT_SLIDER, SLIDER_COUNT)) target = sliderTarget(hit - HIT_SLIDER, x);
+            else if (within(hit, HIT_TARGET, TARGET_COUNT)) target = hit - HIT_TARGET;
+            else if (within(hit, HIT_STEP, TARGET_COUNT * 2)) target = (hit - HIT_STEP) / 2;
             if (target >= 0) adjust(wnd, target, steps, true);
             return 0;
         }
@@ -2744,6 +2852,12 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (g_menuOpen) {
                 switch (wParam) {
                     case VK_ESCAPE: closeMenu(wnd); return 0;
+                    case VK_LEFT:
+                    case VK_RIGHT:
+                        g_menuKey = (g_menuKey + MENU_ROWS) % (MENU_ROWS * 2);
+                        if (g_menuKey >= THEME_COUNT) g_menuKey = THEME_COUNT - 1;
+                        InvalidateRect(wnd, nullptr, FALSE);
+                        return 0;
                     case VK_UP:
                         g_menuKey = (g_menuKey + THEME_COUNT - 1) % THEME_COUNT;
                         InvalidateRect(wnd, nullptr, FALSE);
@@ -2881,7 +2995,11 @@ void request(UINT msg) {
 
 void rememberGameWindow(HWND wnd) {
     HWND fg = GetForegroundWindow();
-    if (fg && fg != wnd) g_game = fg;
+    if (!fg || fg == wnd) return;
+    // Only GD's own window counts (not a launcher or Discord in front at startup).
+    DWORD pid = 0;
+    GetWindowThreadProcessId(fg, &pid);
+    if (pid == GetCurrentProcessId()) g_game = fg;
 }
 
 std::wstring widen(std::string const& s) {

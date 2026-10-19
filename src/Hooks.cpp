@@ -33,9 +33,15 @@ class $modify(PBPlayLayer, PlayLayer) {
         return ghost;
     }
 
+    static void onModify(auto& self) {
+        // Run first, so ghost deaths are caught before other mods' noclip or
+        // death-counter hooks can swallow or count them.
+        (void)self.setHookPriorityPre("PlayLayer::destroyPlayer", Priority::First);
+    }
+
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
         pb::clearQueues();
-        pb::g.tick = 0;
+        pb::resetTiming();
 
         if (!PlayLayer::init(level, useReplay, dontCreateObjects)) return false;
 
@@ -52,7 +58,7 @@ class $modify(PBPlayLayer, PlayLayer) {
 
     void resetLevel() {
         pb::clearQueues();
-        pb::g.tick = 0;
+        pb::resetTiming();
         PlayLayer::resetLevel();
         pb::menu::attempt(m_attempts);
     }
@@ -133,6 +139,23 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
         depth++;
         GJBaseGameLayer::collisionCheckObjects(player, &filtered, static_cast<int>(filtered.size()), dt);
         depth--;
+    }
+
+    // Ghost jumps and landings must not set off Event triggers in the real level.
+    void gameEventTriggered(GJGameEvent event, int material, int playerID) {
+        if (pb::g_simulating) return;
+        GJBaseGameLayer::gameEventTriggered(event, material, playerID);
+    }
+
+    // Safety net: nothing spawns or toggles groups while ghosts run.
+    void spawnGroup(int group, bool ordered, double delay, gd::vector<int> const& remapKeys, int triggerID, int controlID) {
+        if (pb::g_simulating) return;
+        GJBaseGameLayer::spawnGroup(group, ordered, delay, remapKeys, triggerID, controlID);
+    }
+
+    void toggleGroupTriggered(int group, bool activate, gd::vector<int> const& remapKeys, int triggerID, int controlID) {
+        if (pb::g_simulating) return;
+        GJBaseGameLayer::toggleGroupTriggered(group, activate, remapKeys, triggerID, controlID);
     }
 
     bool canBeActivatedByPlayer(PlayerObject* player, EffectGameObject* object) {
@@ -229,6 +252,16 @@ $on_mod(Loaded) {
                 enabled ? "Buffer ON" : "Buffer OFF",
                 enabled ? NotificationIcon::Success : NotificationIcon::Info
             )->show();
+        }
+    });
+
+    // Turning the buffer off any way (F6, the window, Geode settings) fires
+    // whatever was being held back right away, in order.
+    listenForSettingChanges<bool>("enabled", [](bool enabled) {
+        if (enabled) return;
+        if (auto pl = PlayLayer::get()) {
+            pb::flushChannel(pl, 0);
+            pb::flushChannel(pl, 1);
         }
     });
 

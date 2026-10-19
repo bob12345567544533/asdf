@@ -39,6 +39,7 @@ struct State {
     float lastStepDt = 0.25f;  // size of a full physics step (dt passed to player 1)
     std::array<float, 16> recentDts {};
     size_t recentDtIndex = 0;
+    float lastWarp = 0.f;      // time warp the step sizes above were measured at
 };
 
 inline State g;
@@ -50,6 +51,9 @@ void clearGhosts(PlayerObject* a, PlayerObject* b);
 
 // Drops every held input without firing it (death, restart, quitting).
 void clearQueues();
+
+// Starts tick counting and step-size tracking over (new level or attempt).
+void resetTiming();
 
 // Real milliseconds per physics step right now.
 double tickMs(PlayLayer* layer);

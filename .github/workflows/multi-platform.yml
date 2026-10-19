@@ -6,6 +6,11 @@ on:
     branches:
       - "**"
 
+# A newer push to the same branch replaces the running build.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     strategy:
@@ -83,6 +88,7 @@ jobs:
         run: |
           gh release delete lite-latest --yes --cleanup-tag || true
           gh release create lite-latest out/*.geode \
+            --latest=false \
             --target "${{ github.sha }}" \
             --title "Lite - latest build" \
             --notes "Built from ${{ github.sha }}. Drop the .geode into Geometry Dash/geode/mods."
