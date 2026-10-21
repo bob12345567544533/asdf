@@ -2,6 +2,8 @@
 // v1.0.0, console "v4.7"), rebuilt from its compiled code. Same hooks, same
 // order and priorities, same delay search, same F6 stages, same console output.
 
+#include "Ui.hpp"
+
 #include <Geode/Geode.hpp>
 #include <Geode/modify/EffectGameObject.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
@@ -233,6 +235,7 @@ class $modify(PlayLayer) {
             g_counter = 999;
             g_burst = 0;
         }
+        if (ok) ui::attach(this);
         return ok;
     }
 
@@ -403,6 +406,7 @@ class $modify(GJBaseGameLayer) {
         std::fflush(stdout);
         g_pendingDown = down;
         g_pending = chosen;
+        ui::saved(chosen, down, limit);
     }
 
     void collisionCheckObjects(PlayerObject* player, gd::vector<GameObject*>* objects, int count, float dt) {
@@ -473,6 +477,7 @@ class $modify(PlayerObject) {
                             break;
                     }
                     std::fflush(stdout);
+                    ui::stage(g_stage, g_limitAll, g_limitWave);
                 }
 #endif
                 if (g_enabled) {
@@ -574,6 +579,7 @@ $on_mod(Loaded) {
     FILE* out = nullptr;
     freopen_s(&out, "CONOUT$", "w", stdout);
 #endif
+    ui::init();
     std::puts("[InputBuffer] v4.7 LOADED (Zero-Lag + Up Arrow Fix)");
     std::puts("[InputBuffer] Starting Mode: STAGE 1 (2 All / 2 Wave)");
     std::puts("[InputBuffer] Press F6 in-level to cycle: 2/2 -> 4/4 -> 8/8 -> 16/8 -> OFF");
