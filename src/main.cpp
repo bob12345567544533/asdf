@@ -52,8 +52,8 @@ void copyRaw(PlayerObject* to, PlayerObject* from, size_t offset) {
 void setupGhost(PlayerObject* ghost, PlayerObject* real) {
     ghost->setVisible(false);
     ghost->copyAttributes(real);
-    ghost->setRotation(real->getRotation());
-    ghost->setPosition(real->getPosition());
+    ghost->setScale(real->getScale());
+    ghost->setContentSize(real->getContentSize());
     copyRaw<float>(ghost, real, 0x2fc);
     copyRaw<float>(ghost, real, 0x300);
     copyRaw<float>(ghost, real, 0xb84);
