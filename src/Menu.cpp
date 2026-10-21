@@ -260,9 +260,11 @@ Theme const& shown() { return THEMES[std::clamp(g_shown, 0, THEME_COUNT - 1)]; }
 // Values
 // ===========================================================================
 
+// No min handle: the buffer always searches from 1 tick (like the original),
+// so the slider is a single max handle.
 int lowTicks() {
     int hi = g_values.sliders[0];
-    return hi > 0 ? std::min(g_values.minTicks, hi) : g_values.minTicks;
+    return hi > 0 ? hi : 1;
 }
 
 void setMax(int v) {
@@ -2521,6 +2523,7 @@ void dragTo(HWND wnd, float x) {
 // range, whichever handle is closer to the mouse.
 int sliderTarget(int slider, float x) {
     if (slider == 1) return T_RANDOM;
+    if (slider == 0) return T_MAX; // single handle
     int hi = g_values.sliders[0];
     if (hi <= 0) return T_MAX;
     int lo = lowTicks();

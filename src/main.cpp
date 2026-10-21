@@ -436,7 +436,7 @@ class $modify(GJBaseGameLayer) {
         // there. Every run before the pick is a failed one, exactly like the
         // original's search, so no run starts from a ghost left over from a
         // successful run. Nothing safe from there up: normal search from 1.
-        int first = std::clamp(g_minTicks, 1, std::max(limit, 1));
+        int first = 1; // always from 1 tick, like the original
         int offset = g_randomize > 0 ? std::uniform_int_distribution<int>(0, g_randomize)(rng()) : 0;
         int start = std::min(first + offset, limit);
         int chosen = 0;
