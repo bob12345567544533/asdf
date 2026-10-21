@@ -18,6 +18,7 @@ void attach(PlayLayer* layer) {
 }
 
 void popup(std::string const& text, bool good) {
+    if (!Mod::get()->getSettingValue<bool>("show-feedback")) return;
     auto pl = PlayLayer::get();
     if (!pl) return;
     auto holder = pl->getChildByID(POPUP_ID);

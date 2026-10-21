@@ -2,6 +2,7 @@
 // v1.0.0, console "v4.7"), rebuilt from its compiled code. Same hooks, same
 // order and priorities, same delay search, same F6 stages, same console output.
 
+#include "Menu.hpp"
 #include "Ui.hpp"
 
 #include <Geode/Geode.hpp>
@@ -40,6 +41,12 @@ int g_stage = 0;           // F6 stage, 0..4 (4 = off)
 bool g_enabled = true;
 int g_limitAll = 2;
 int g_limitWave = 2;
+// Window settings (same defaults as the original + Randomize 3).
+int g_minTicks = 1;
+int g_randomize = 3;
+bool g_releases = true;
+bool g_ship = false;
+int g_lastAttempt = -1;
 int g_pending = -1;        // >= 0: steps until the held-back input fires
 bool g_pendingDown = true;
 bool g_flipAfter = false;  // the opposite input came in while one was held back
@@ -47,7 +54,32 @@ float g_dt = 0.25f;
 int g_counter = 999;       // player steps since the last input (capped)
 int g_burst = 0;           // quick inputs in a row
 
-constexpr int RANDOMIZE_TICKS = 3; // the search starts up to this many ticks later, at random
+void readSettings() {
+    auto mod = Mod::get();
+    g_enabled = mod->getSettingValue<bool>("enabled");
+    g_limitAll = static_cast<int>(mod->getSettingValue<int64_t>("buffer-ticks"));
+    g_limitWave = std::min(g_limitAll, 8); // like the original's 16 / 8 stage
+    g_minTicks = static_cast<int>(mod->getSettingValue<int64_t>("buffer-min-ticks"));
+    g_randomize = static_cast<int>(mod->getSettingValue<int64_t>("randomize"));
+    g_releases = mod->getSettingValue<bool>("buffer-releases");
+    g_ship = mod->getSettingValue<bool>("buffer-ship");
+}
+
+int modeIndex(PlayerObject* p) {
+    if (p->m_isShip) return 1;
+    if (p->m_isBall) return 2;
+    if (p->m_isBird) return 3;
+    if (p->m_isDart) return 4;
+    if (p->m_isRobot) return 5;
+    if (p->m_isSpider) return 6;
+    if (p->m_isSwing) return 7;
+    return 0;
+}
+
+int levelPercent(PlayLayer* pl) {
+    if (!pl || !pl->m_player1 || pl->m_levelLength <= 0.f) return -1;
+    return static_cast<int>(std::clamp(pl->m_player1->getPositionX() / pl->m_levelLength * 100.f, 0.f, 100.f));
+}
 
 std::mt19937& rng() {
     static std::mt19937 gen { std::random_device {}() };
@@ -244,7 +276,11 @@ class $modify(PlayLayer) {
             g_counter = 999;
             g_burst = 0;
         }
-        if (ok) ui::attach(this);
+        if (ok) {
+            ui::attach(this);
+            g_lastAttempt = m_attempts;
+            pb::menu::attempt(m_attempts, true);
+        }
         return ok;
     }
 
@@ -264,6 +300,7 @@ class $modify(PlayLayer) {
         g_lastDown = false;
         g_burst = 0;
         PlayLayer::destroyPlayer(player, object);
+        if (player == m_player1 && player->m_isDead) pb::menu::death(levelPercent(this));
     }
 
     void playEndAnimationToPos(CCPoint pos) {
@@ -313,7 +350,8 @@ class $modify(GJBaseGameLayer) {
         auto p1 = m_player1;
         PlayerObject* p2 = dual ? pl->m_player2 : nullptr;
         bool hasP2 = p2 && dual;
-        if (!p1 || p1->m_isDead || p1->m_isShip || (hasP2 && p2->m_isShip)) {
+        bool shipOff = !g_ship && p1 && (p1->m_isShip || (hasP2 && p2->m_isShip));
+        if (!p1 || p1->m_isDead || shipOff) {
             g_pending = -1;
             g_flipAfter = false;
             return passThrough();
@@ -355,8 +393,14 @@ class $modify(GJBaseGameLayer) {
             g_burst = 0;
         }
 
-        // Releases only matter for wave and robot.
-        if (!p1->m_isDart) {
+        if (!down && !g_releases) {
+            g_lastDown = false;
+            return GJBaseGameLayer::handleButton(down, button, isPlayer1);
+        }
+
+        // Releases only matter for wave and robot (and ship, if Ship is on).
+        bool shipRelease = g_ship && (p1->m_isShip || (hasP2 && p2->m_isShip));
+        if (!p1->m_isDart && !shipRelease) {
             bool waveP2 = hasP2 && !p1->m_isRobot && p2->m_isDart;
             if (!waveP2) {
                 bool robot = (p1->m_isRobot || !hasP2) ? p1->m_isRobot : p2->m_isRobot;
@@ -392,8 +436,9 @@ class $modify(GJBaseGameLayer) {
         // there. Every run before the pick is a failed one, exactly like the
         // original's search, so no run starts from a ghost left over from a
         // successful run. Nothing safe from there up: normal search from 1.
-        int offset = std::uniform_int_distribution<int>(0, RANDOMIZE_TICKS)(rng());
-        int start = std::min(1 + offset, limit);
+        int first = std::clamp(g_minTicks, 1, std::max(limit, 1));
+        int offset = g_randomize > 0 ? std::uniform_int_distribution<int>(0, g_randomize)(rng()) : 0;
+        int start = std::min(first + offset, limit);
         int chosen = 0;
         int result = 0;
         bool fallback = false;
@@ -405,9 +450,9 @@ class $modify(GJBaseGameLayer) {
                 break;
             }
         }
-        if (chosen <= 0 && start > 1) {
+        if (chosen <= 0 && start > first) {
             fallback = true;
-            for (int d = 1; d < start; ++d) {
+            for (int d = first; d < start; ++d) {
                 result = simulate(pl, p1, p2, dual, d, down, horizon, &before);
                 if (before) return passThrough();
                 if (safe(d, result)) {
@@ -417,17 +462,18 @@ class $modify(GJBaseGameLayer) {
             }
         }
         if (chosen <= 0) return passThrough();
-        std::string pickNote = fallback ? "fallback" : fmt::format("random +{}", start - 1);
+        bool random = g_randomize > 0 && !fallback;
+        std::string pickNote = g_randomize <= 0 ? std::string() : fallback ? std::string(", fallback")
+                                                                : fmt::format(", random +{}", start - first);
 
-        std::printf(
-            "[InputBuffer] *** SAVED +%d TICKS (%.2f frames @ 60fps) %s! (Frame0: %d -> Delayed: %d) [Limit: %d] (%s) ***\n",
-            chosen, chosen * 0.25, kind, base, result, limit, pickNote.c_str()
-        );
-        std::fflush(stdout);
+        log::info("SAVED +{} ticks ({:.2f} frames @ 60fps) {} (Frame0: {} -> Delayed: {}) [Limit: {}]{}",
+            chosen, chosen * 0.25, kind, base, result, limit, pickNote);
         g_pendingDown = down;
         g_pending = chosen;
-        ui::popup(fmt::format("{} {:.1f}ms early ({} tick{}, {})", down ? "Click" : "Release", chosen * (1000.0 / 240.0),
+        double ms = chosen * (1000.0 / 240.0);
+        ui::popup(fmt::format("{} {:.1f}ms early ({} tick{}{})", down ? "Click" : "Release", ms,
             chosen, chosen == 1 ? "" : "s", pickNote));
+        pb::menu::saved(chosen, ms, modeIndex(p1), !down, random, levelPercent(pl));
     }
 
     void collisionCheckObjects(PlayerObject* player, gd::vector<GameObject*>* objects, int count, float dt) {
@@ -478,34 +524,42 @@ class $modify(PlayerObject) {
                     switch (g_stage) {
                         case 0:
                             g_enabled = true; g_limitAll = 2; g_limitWave = 2;
-                            std::puts("[InputBuffer] F6 Cycle -> STAGE 1: 2 Ticks All | 2 Ticks Wave (0.5f @ 60fps)");
+                            
                             break;
                         case 1:
                             g_enabled = true; g_limitAll = 4; g_limitWave = 4;
-                            std::puts("[InputBuffer] F6 Cycle -> STAGE 2: 4 Ticks All | 4 Ticks Wave (1.0f @ 60fps)");
+                            
                             break;
                         case 2:
                             g_enabled = true; g_limitAll = 8; g_limitWave = 8;
-                            std::puts("[InputBuffer] F6 Cycle -> STAGE 3: 8 Ticks All | 8 Ticks Wave (2.0f @ 60fps)");
+                            
                             break;
                         case 3:
                             g_enabled = true; g_limitAll = 16; g_limitWave = 8;
-                            std::puts("[InputBuffer] F6 Cycle -> STAGE 4: 16 Ticks All | 8 Ticks Wave (4.0f / 2.0f @ 60fps)");
+                            
                             break;
                         default:
                             g_enabled = false; g_limitAll = 0; g_limitWave = 0;
-                            std::printf("[InputBuffer] F6 Cycle -> STAGE 5: OFF (100%% Raw Input)\n");
+                            
                             break;
                     }
-                    std::fflush(stdout);
-                    ui::popup(g_enabled ? fmt::format("Stage {}: {} / {} ticks", g_stage + 1, g_limitAll, g_limitWave)
-                                        : std::string("Buffer OFF"), g_enabled);
+                    auto stageText = g_enabled ? fmt::format("Stage {}: {} / {} ticks", g_stage + 1, g_limitAll, g_limitWave)
+                                               : std::string("Buffer OFF");
+                    ui::popup(stageText, g_enabled);
+                    pb::menu::log(stageText);
+                    // Keep the window in sync with the stage.
+                    Mod::get()->setSettingValue<bool>("enabled", g_enabled);
+                    if (g_enabled) Mod::get()->setSettingValue<int64_t>("buffer-ticks", g_limitAll);
                 }
 #endif
+                if (pl->m_attempts != g_lastAttempt) {
+                    g_lastAttempt = pl->m_attempts;
+                    pb::menu::attempt(g_lastAttempt);
+                }
                 if (g_enabled) {
                     if (g_counter <= 998) g_counter++;
-                    bool ship = m_isShip
-                        || (pl->m_gameState.m_isDualMode && pl->m_player2 && pl->m_player2->m_isShip);
+                    bool ship = !g_ship && (m_isShip
+                        || (pl->m_gameState.m_isDualMode && pl->m_player2 && pl->m_player2->m_isShip));
                     if (ship) {
                         g_pending = -1;
                         g_flipAfter = false;
@@ -595,14 +649,29 @@ class $modify(HardStreak) {
 };
 
 $on_mod(Loaded) {
-#ifdef GEODE_IS_WINDOWS
-    AllocConsole();
-    SetConsoleTitleA("Geode Predictive Input Buffer - Live Console");
-    FILE* out = nullptr;
-    freopen_s(&out, "CONOUT$", "w", stdout);
-#endif
-    std::puts("[InputBuffer] v4.7 LOADED (Zero-Lag + Up Arrow Fix)");
-    std::puts("[InputBuffer] Starting Mode: STAGE 1 (2 All / 2 Wave)");
-    std::puts("[InputBuffer] Press F6 in-level to cycle: 2/2 -> 4/4 -> 8/8 -> 16/8 -> OFF");
-    std::fflush(stdout);
+    readSettings();
+    log::info("v4.7 LOADED (Zero-Lag + Up Arrow Fix). F6 cycles 2/2 -> 4/4 -> 8/8 -> 16/8 -> OFF, F7 shows the window.");
+
+    listenForKeybindSettingPresses("menu-key", [](Keybind const&, bool down, bool repeat, double) {
+        if (down && !repeat) pb::menu::toggle();
+    });
+
+    listenForSettingChanges<bool>("enabled", [](bool enabled) {
+        if (!enabled) {
+            // Don't swallow an input that was waiting to fire.
+            if (auto pl = PlayLayer::get(); pl && g_pending >= 0) feed(pl, g_pendingDown);
+            g_pending = -1;
+            g_flipAfter = false;
+        }
+    });
+
+    listenForAllSettingChanges([](std::string_view, std::shared_ptr<SettingV3>) {
+        readSettings();
+        pb::menu::sync();
+    });
+}
+
+$on_game(Loaded) {
+    if (Mod::get()->getSettingValue<bool>("open-window")) pb::menu::open();
+    else pb::menu::prepare();
 }

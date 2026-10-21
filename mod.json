@@ -3,9 +3,100 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v1.0.6",
+	"version": "v1.1.0",
 	"id": "ai.predictivebuffer",
 	"name": "Predictive Input Buffer",
 	"developer": "lilWC",
-	"description": "Trajectory-based 1-2 frame press and wave release input buffer."
+	"description": "Trajectory-based 1-2 frame press and wave release input buffer.",
+	"settings": {
+		"enabled": {
+			"type": "bool",
+			"name": "Enabled",
+			"default": true
+		},
+		"buffer-ticks": {
+			"type": "int",
+			"name": "Max Ticks",
+			"description": "Largest delay the buffer may add, in 240 TPS ticks (1 tick = 4.17 ms). Wave is capped at 8. F6 also sets this (2 / 4 / 8 / 16).",
+			"default": 2,
+			"min": 0,
+			"max": 24,
+			"control": {
+				"arrow-step": 1,
+				"slider-step": 1
+			}
+		},
+		"buffer-min-ticks": {
+			"type": "int",
+			"name": "Min Ticks",
+			"description": "Smallest delay the buffer will use. With Min 1 and Max 4 it only delays by 1 to 4 ticks. If Min is above Max, Max is used.",
+			"default": 1,
+			"min": 1,
+			"max": 24,
+			"control": {
+				"arrow-step": 1,
+				"slider-step": 1
+			}
+		},
+		"randomize": {
+			"type": "int",
+			"name": "Randomize (ticks)",
+			"description": "0 = always the smallest safe delay (like the original). Above 0 = the search starts at a random delay up to this many ticks above Min, and takes the first safe one from there.",
+			"default": 3,
+			"min": 0,
+			"max": 24,
+			"control": {
+				"arrow-step": 1,
+				"slider-step": 1
+			}
+		},
+		"buffer-releases": {
+			"type": "bool",
+			"name": "Releases",
+			"description": "Also buffer early releases for wave and robot (and ship, if Ship is on).",
+			"default": true
+		},
+		"buffer-ship": {
+			"type": "bool",
+			"name": "Ship",
+			"default": false
+		},
+		"menu-key": {
+			"type": "keybind",
+			"name": "Window Key",
+			"default": "F7",
+			"category": "universal"
+		},
+		"open-window": {
+			"type": "bool",
+			"name": "Open Window On Launch",
+			"default": true
+		},
+		"window-size": {
+			"type": "int",
+			"name": "Window Size (%)",
+			"description": "On top of the automatic sizing (1x on 1080p, 1.33x on 1440p).",
+			"default": 100,
+			"min": 50,
+			"max": 200,
+			"control": {
+				"arrow-step": 5,
+				"slider-step": 5
+			}
+		},
+		"theme": {
+			"type": "string",
+			"name": "Window Theme",
+			"description": "Look of the F7 window.",
+			"default": "Minimal",
+			"one-of": [
+				"Minimal"
+			]
+		},
+		"show-feedback": {
+			"type": "bool",
+			"name": "Timing Popup",
+			"default": true
+		}
+	}
 }
