@@ -1,6 +1,6 @@
 // Straight port of the original Predictive Input Buffer (ai.predictivebuffer
 // v1.0.0, console "v4.7"), rebuilt from its compiled code. Same hooks, same
-// order, same delay search, same F6 stages, same console output. Nothing added.
+// order and priorities, same delay search, same F6 stages, same console output.
 
 #include <Geode/Geode.hpp>
 #include <Geode/modify/EffectGameObject.hpp>
@@ -211,6 +211,11 @@ PlayerObject* makeGhost(PlayLayer* pl) {
 // ---------------------------------------------------------------------------
 
 class $modify(PlayLayer) {
+    static void onModify(auto& self) {
+        (void)self.setHookPriority("PlayLayer::destroyPlayer", -1000000);
+        (void)self.setHookPriority("PlayLayer::playEndAnimationToPos", -1000000);
+    }
+
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
         bool ok = PlayLayer::init(level, useReplay, dontCreateObjects);
         if (ok && GameManager::sharedState()->m_playLayer) {
@@ -265,6 +270,13 @@ class $modify(LevelEditorLayer) {
 };
 
 class $modify(GJBaseGameLayer) {
+    static void onModify(auto& self) {
+        (void)self.setHookPriority("GJBaseGameLayer::canBeActivatedByPlayer", -1000000);
+        (void)self.setHookPriority("GJBaseGameLayer::handleButton", -1000000);
+        (void)self.setHookPriority("GJBaseGameLayer::collisionCheckObjects", -1000000);
+        (void)self.setHookPriority("GJBaseGameLayer::playerTouchedRing", -1000000);
+    }
+
     void handleButton(bool down, int button, bool isPlayer1) {
         if (g_sim || button != static_cast<int>(PlayerButton::Jump) || g_firing) {
             return GJBaseGameLayer::handleButton(down, button, isPlayer1);
@@ -423,8 +435,6 @@ class $modify(GJBaseGameLayer) {
 };
 
 class $modify(PlayerObject) {
-    // Same as the original: these three run before every other mod's hooks, so
-    // a ghost's jumps are swallowed before any other mod can count them.
     static void onModify(auto& self) {
         (void)self.setHookPriority("PlayerObject::playSpiderDashEffect", -1000000);
         (void)self.setHookPriority("PlayerObject::incrementJumps", -1000000);
@@ -525,6 +535,10 @@ class $modify(PlayerObject) {
 };
 
 class $modify(EffectGameObject) {
+    static void onModify(auto& self) {
+        (void)self.setHookPriority("EffectGameObject::triggerObject", -1000000);
+    }
+
     void triggerObject(GJBaseGameLayer* layer, int uniqueID, gd::vector<int> const* remapKeys) {
         if (g_sim) return;
         EffectGameObject::triggerObject(layer, uniqueID, remapKeys);
@@ -532,6 +546,10 @@ class $modify(EffectGameObject) {
 };
 
 class $modify(GameObject) {
+    static void onModify(auto& self) {
+        (void)self.setHookPriority("GameObject::playShineEffect", -1000000);
+    }
+
     void playShineEffect() {
         if (g_sim) return;
         GameObject::playShineEffect();
@@ -539,6 +557,10 @@ class $modify(GameObject) {
 };
 
 class $modify(HardStreak) {
+    static void onModify(auto& self) {
+        (void)self.setHookPriority("HardStreak::addPoint", -1000000);
+    }
+
     void addPoint(CCPoint point) {
         if (g_sim) return;
         HardStreak::addPoint(point);
