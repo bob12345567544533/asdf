@@ -47,7 +47,7 @@ float g_dt = 0.25f;
 int g_counter = 999;       // player steps since the last input (capped)
 int g_burst = 0;           // quick inputs in a row
 
-constexpr int RANDOMIZE_TICKS = 3; // try up to this many ticks above the smallest safe delay
+constexpr int RANDOMIZE_TICKS = 3; // the search starts up to this many ticks later, at random
 
 std::mt19937& rng() {
     static std::mt19937 gen { std::random_device {}() };
@@ -376,73 +376,58 @@ class $modify(GJBaseGameLayer) {
         int base = simulate(pl, p1, p2, dual, 0, down, horizon, &before);
         if (base >= horizon || limit <= 0) return passThrough();
 
-        int chosen = 0;
-        int result = 0;
-        if (anyWave) {
-            int need = base + 10;
-            int gain = 6;
-            for (int d = 1;; ++d) {
-                result = simulate(pl, p1, p2, dual, d, down, horizon, &before);
-                if (before) return passThrough();
-                bool ok = result < horizon ? result >= need : (result - base >= gain || result >= need);
-                if (ok) {
-                    chosen = d;
-                    break;
-                }
-                if (d == limit) return passThrough();
-                need += 2;
-                gain += 2;
-            }
-        }
-        else {
-            int need = std::min(base + 12, horizon);
-            for (int d = 1;; ++d) {
-                result = simulate(pl, p1, p2, dual, d, down, horizon, &before);
-                if (before) return passThrough();
-                if (result >= need) {
-                    chosen = d;
-                    break;
-                }
-                if (d == limit) return passThrough();
-            }
-        }
-        if (chosen <= 0) return passThrough();
-
-        // Randomize: also try up to +3 ticks above the smallest safe delay, with
-        // the original's own safety rule, and pick one of the safe ones at random.
-        std::vector<std::pair<int, int>> options { { chosen, result } };
-        int top = std::min(limit, chosen + RANDOMIZE_TICKS);
-        for (int d = chosen + 1; d <= top; ++d) {
-            int r = simulate(pl, p1, p2, dual, d, down, horizon, &before);
-            if (before) break;
-            bool ok;
+        // The original's safety rule for a delay of d ticks (wave gets stricter
+        // as d grows; same numbers as its own search).
+        auto safe = [&](int d, int r) {
             if (anyWave) {
                 int need = base + 10 + 2 * (d - 1);
                 int gain = 6 + 2 * (d - 1);
-                ok = r < horizon ? r >= need : (r - base >= gain || r >= need);
+                return r < horizon ? r >= need : (r - base >= gain || r >= need);
             }
-            else {
-                ok = r >= std::min(base + 12, horizon);
+            return r >= std::min(base + 12, horizon);
+        };
+
+        // Randomize: start the original's search at a random delay (+0 to +3
+        // above where it normally starts) and take the first safe delay from
+        // there. Every run before the pick is a failed one, exactly like the
+        // original's search, so no run starts from a ghost left over from a
+        // successful run. Nothing safe from there up: normal search from 1.
+        int offset = std::uniform_int_distribution<int>(0, RANDOMIZE_TICKS)(rng());
+        int start = std::min(1 + offset, limit);
+        int chosen = 0;
+        int result = 0;
+        bool fallback = false;
+        for (int d = start; d <= limit; ++d) {
+            result = simulate(pl, p1, p2, dual, d, down, horizon, &before);
+            if (before) break;
+            if (safe(d, result)) {
+                chosen = d;
+                break;
             }
-            if (ok) options.push_back({ d, r });
         }
-        bool random = options.size() > 1;
-        if (random) {
-            std::uniform_int_distribution<size_t> pick(0, options.size() - 1);
-            auto const& o = options[pick(rng())];
-            chosen = o.first;
-            result = o.second;
+        if (chosen <= 0 && start > 1) {
+            fallback = true;
+            for (int d = 1; d < start; ++d) {
+                result = simulate(pl, p1, p2, dual, d, down, horizon, &before);
+                if (before) return passThrough();
+                if (safe(d, result)) {
+                    chosen = d;
+                    break;
+                }
+            }
         }
+        if (chosen <= 0) return passThrough();
+        std::string pickNote = fallback ? "fallback" : fmt::format("random +{}", start - 1);
 
         std::printf(
-            "[InputBuffer] *** SAVED +%d TICKS (%.2f frames @ 60fps) %s! (Frame0: %d -> Delayed: %d) [Limit: %d] %s ***\n",
-            chosen, chosen * 0.25, kind, base, result, limit, random ? "(random)" : "(1 safe)"
+            "[InputBuffer] *** SAVED +%d TICKS (%.2f frames @ 60fps) %s! (Frame0: %d -> Delayed: %d) [Limit: %d] (%s) ***\n",
+            chosen, chosen * 0.25, kind, base, result, limit, pickNote.c_str()
         );
         std::fflush(stdout);
         g_pendingDown = down;
         g_pending = chosen;
         ui::popup(fmt::format("{} {:.1f}ms early ({} tick{}, {})", down ? "Click" : "Release", chosen * (1000.0 / 240.0),
-            chosen, chosen == 1 ? "" : "s", random ? "random" : "1 safe"));
+            chosen, chosen == 1 ? "" : "s", pickNote));
     }
 
     void collisionCheckObjects(PlayerObject* player, gd::vector<GameObject*>* objects, int count, float dt) {
