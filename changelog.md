@@ -1,3 +1,6 @@
+# v1.6.2
+- The prediction no longer counts brushing a block with the outer hitbox as a crash (only the inner hitbox kills, like GD), so it buffers far more often and picks better delays.
+
 # v1.6.1
 - Fixed the buffer sometimes doing nothing: the prediction now decides block landings by position instead of speed (upside-down sections especially), and the hidden copy can jump off blocks again, so longer and fixed delays work.
 

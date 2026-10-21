@@ -196,8 +196,15 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
                 if (!topIsGround) player->hitGround(nullptr, false);
             }
             else {
-                pb::g_simDied = true;
-                return;
+                // Like GD: brushing a block with the outer box is fine, you only
+                // crash when the small inner hitbox goes into it.
+                CCRect inner = myBox();
+                float iw = inner.size.width * 0.3f, ih = inner.size.height * 0.3f;
+                inner = CCRect(inner.getMidX() - iw / 2.f, inner.getMidY() - ih / 2.f, iw, ih);
+                if (inner.intersectsRect(box)) {
+                    pb::g_simDied = true;
+                    return;
+                }
             }
         }
 

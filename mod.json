@@ -8,7 +8,7 @@
 	},
 	"id": "lilwc.input-buffer-lite",
 	"name": "Input Buffer Lite",
-	"version": "v1.6.1",
+	"version": "v1.6.2",
 	"developer": "lilWC",
 	"description": "Input timing tweaks.",
 	"tags": ["gameplay"],
