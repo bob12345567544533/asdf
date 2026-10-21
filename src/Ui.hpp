@@ -1,22 +1,16 @@
 #pragma once
 
-// Display only: the Minimal window (F7) and the in-game timing popup.
-// Nothing here changes how the buffer works.
+#include <string>
 
 class PlayLayer;
 
+// In-game timing popup (display only).
 namespace ui {
-
-// Starts the window (Windows). Call once on load.
-void init();
 
 // A new level started: put the popup layer on it.
 void attach(PlayLayer* layer);
 
-// An input was buffered by `ticks` steps. Main thread.
-void saved(int ticks, bool press, int limit);
-
-// F6 changed the stage (0..3 = stages 1-4, 4 = off). Main thread.
-void stage(int index, int all, int wave);
+// Shows a short line bottom left that fades out (if Timing Popup is on).
+void popup(std::string const& text, bool good = true);
 
 } // namespace ui
