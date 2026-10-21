@@ -186,14 +186,28 @@ void setButton(PlayerObject* ghost, bool down) {
     else if (ghost == g_ghost2) g_simHeld[1] = down;
 }
 
-// Clears what a previous check left on the ghost (held buttons, touched orbs,
-// a dash, a death), so every check starts the same way.
+// Clears what a previous check left on the ghost (a held button, a death), so
+// every check starts the same way. Only plain resets: GD's own reset
+// functions are avoided, they can touch game-wide state like the cursor.
 void freshen(PlayerObject* ghost) {
-    ghost->releaseAllButtons();
-    ghost->resetTouchedRings(true);
-    if (ghost->m_isDashing) ghost->stopDashing();
+    ghost->releaseButton(PlayerButton::Jump);
     ghost->m_isDead = false;
 }
+
+#ifdef GEODE_IS_WINDOWS
+// Safety net: paused or outside a level, the cursor must be visible. If
+// something left it hidden, show it again.
+class CursorGuard : public CCObject {
+public:
+    void check(float) {
+        auto pl = PlayLayer::get();
+        if (pl && !pl->m_isPaused) return; // GD hides it while you play
+        CURSORINFO info { sizeof(info) };
+        if (!GetCursorInfo(&info) || (info.flags & CURSOR_SHOWING)) return;
+        for (int i = 0; i < 16 && ShowCursor(TRUE) < 0; ++i) {}
+    }
+};
+#endif
 
 void clearLogs(PlayerObject* ghost) {
     ghost->m_collisionLogTop->removeAllObjects();
@@ -842,6 +856,10 @@ $on_mod(Loaded) {
 }
 
 $on_game(Loaded) {
+#ifdef GEODE_IS_WINDOWS
+    static auto guard = new CursorGuard();
+    CCDirector::get()->getScheduler()->scheduleSelector(schedule_selector(CursorGuard::check), guard, 0.5f, false);
+#endif
     if (Mod::get()->getSettingValue<bool>("open-window")) pb::menu::open();
     else pb::menu::prepare();
 }

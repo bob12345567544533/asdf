@@ -3,7 +3,7 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v1.2.1",
+	"version": "v1.2.2",
 	"id": "ai.predictivebuffer",
 	"name": "Predictive Input Buffer",
 	"developer": "lilWC",
@@ -111,7 +111,7 @@
 		"fresh-ghost": {
 			"type": "bool",
 			"name": "Fresh Ghost",
-			"description": "Fully resets the hidden ghost before every check, so the same situation always gives the same answer.",
+			"description": "Resets the hidden ghost's held button before every check, so each check starts the same way.",
 			"default": true
 		},
 		"stop-at-portals": {
