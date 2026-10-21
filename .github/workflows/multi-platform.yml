@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - lite
+      - port
 
 # A newer push to the same branch replaces the running build.
 concurrency:
@@ -58,7 +58,7 @@ jobs:
     name: Publish latest build
     runs-on: ubuntu-latest
     needs: ['package']
-    if: github.ref == 'refs/heads/lite'
+    if: github.ref == 'refs/heads/port'
     permissions:
       contents: write
 
@@ -73,9 +73,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release delete lite-latest --yes --cleanup-tag || true
-          gh release create lite-latest out/*.geode \
+          gh release delete port-latest --yes --cleanup-tag || true
+          gh release create port-latest out/*.geode \
             --latest=false \
             --target "${{ github.sha }}" \
-            --title "Lite - latest build" \
+            --title "Port - latest build" \
             --notes "Built from ${{ github.sha }}. Drop the .geode into Geometry Dash/geode/mods."
