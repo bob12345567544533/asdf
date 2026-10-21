@@ -423,6 +423,14 @@ class $modify(GJBaseGameLayer) {
 };
 
 class $modify(PlayerObject) {
+    // Same as the original: these three run before every other mod's hooks, so
+    // a ghost's jumps are swallowed before any other mod can count them.
+    static void onModify(auto& self) {
+        (void)self.setHookPriority("PlayerObject::playSpiderDashEffect", -1000000);
+        (void)self.setHookPriority("PlayerObject::incrementJumps", -1000000);
+        (void)self.setHookPriority("PlayerObject::ringJump", -1000000);
+    }
+
     void update(float dt) {
         if (!g_sim) {
             auto pl = GameManager::sharedState()->m_playLayer;
