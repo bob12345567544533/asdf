@@ -4,7 +4,12 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - "**"
+      - main
+
+# A newer push to the same branch replaces the running build.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -12,23 +17,10 @@ jobs:
       fail-fast: false
       matrix:
         config:
+        # Windows only: it's the only platform this mod is used on, and the
+        # macOS runners cost 10x the build minutes.
         - name: Windows
           os: windows-latest
-
-        - name: macOS
-          os: macos-latest
-
-        - name: iOS
-          os: macos-latest
-          target: iOS
-
-        - name: Android32
-          os: ubuntu-latest
-          target: Android32
-
-        - name: Android64
-          os: ubuntu-latest
-          target: Android64
 
     name: ${{ matrix.config.name }}
     runs-on: ${{ matrix.config.os }}
@@ -41,10 +33,11 @@ jobs:
         with:
           combine: true
           target: ${{ matrix.config.target }}
-          # Locked to a known-good bindings commit for GD 2.2081, and the code
-          # generator is built from it instead of downloading the newest one
-          # (which expects a newer Geode SDK than 5.11.2).
+          # Locked to a known-good bindings commit for GD 2.2081. Newer commits
+          # on bindings main are mostly for 2.2091 and broke the build.
           bindings-ref: d3a81aa011a4c2cc4a406d30321cd68d21ca9a80
+          # Build the code generator from those bindings instead of downloading
+          # the newest prebuilt one, which expects a newer Geode SDK than 5.11.2.
           configure-args: -DSKIP_BUILDING_CODEGEN=OFF
 
   package:
@@ -82,6 +75,7 @@ jobs:
         run: |
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest out/*.geode \
+            --latest=false \
             --target "${{ github.sha }}" \
-            --title "Latest build" \
+            --title "Predictive Input Buffer - latest build" \
             --notes "Built from ${{ github.sha }}. Drop the .geode into Geometry Dash/geode/mods."
