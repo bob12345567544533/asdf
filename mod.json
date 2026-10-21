@@ -1,9 +1,10 @@
 {
 	"geode": "5.11.2",
 	"gd": {
-		"win": "2.2081"
+		"win": "2.2081",
+		"android": "2.2081"
 	},
-	"version": "v1.0.3",
+	"version": "v1.0.0",
 	"id": "ai.predictivebuffer",
 	"name": "Predictive Input Buffer",
 	"developer": "lilWC",
