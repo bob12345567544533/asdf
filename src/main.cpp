@@ -148,9 +148,10 @@ int modeIndex(PlayerObject* p) {
     return 0;
 }
 
+// The level % exactly as GD shows it (GD 2.2 levels go by time, not distance).
 int levelPercent(PlayLayer* pl) {
-    if (!pl || !pl->m_player1 || pl->m_levelLength <= 0.f) return -1;
-    return static_cast<int>(std::clamp(pl->m_player1->getPositionX() / pl->m_levelLength * 100.f, 0.f, 100.f));
+    if (!pl) return -1;
+    return static_cast<int>(std::clamp(pl->getCurrentPercent(), 0.f, 100.f));
 }
 
 std::mt19937& rng() {
