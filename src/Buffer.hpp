@@ -15,7 +15,6 @@ char const* modeName(Mode mode);
 // Global flags read by the hooks that block side effects during a simulation.
 inline bool g_simulating = false;             // a ghost simulation is running right now
 inline bool g_simDied = false;                // a ghost died during the current simulation
-inline cocos2d::CCPoint g_prevPos[2] {};            // ghost positions before this sim step
 inline bool g_simStopped = false;             // a ghost reached a portal/pad/orb the sim can't model
 inline std::array<bool, 2> g_simHeld {};      // jump button state of each ghost
 inline bool g_bypass = false;                 // we are replaying a held input, don't intercept it

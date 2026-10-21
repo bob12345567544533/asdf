@@ -1,3 +1,7 @@
+# v1.7.0
+- Back to GD's real collision for the prediction (accurate buffering again, slopes too).
+- The mod's death hook now runs before every other mod, so other mods never see the hidden prediction player "die" (that is what blocked PBs).
+
 # v1.6.2
 - The prediction no longer counts brushing a block with the outer hitbox as a crash (only the inner hitbox kills, like GD), so it buffers far more often and picks better delays.
 

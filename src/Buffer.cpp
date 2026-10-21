@@ -336,7 +336,6 @@ SimResult simulate(SimSetup const& s, int delay, int& budget) {
         }
 
         for (size_t i = 0; i < s.count; ++i) {
-            g_prevPos[i] = ghosts[i]->getPosition();
             ghosts[i]->update(s.dt);
             ghosts[i]->updateRotation(s.dt);
         }

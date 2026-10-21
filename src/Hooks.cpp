@@ -24,6 +24,13 @@ class $modify(PBPlayLayer, PlayLayer) {
         }
     };
 
+    static void onModify(auto& self) {
+        // Run before every other mod, so a ghost's "death" is caught here and no
+        // other mod (noclip, death counter, safe mode, accuracy...) ever sees it.
+        // Otherwise those mods can count it as a real death and block the save.
+        (void)self.setHookPriorityPre("PlayLayer::destroyPlayer", Priority::First);
+    }
+
     PlayerObject* makeGhost() {
         auto ghost = PlayerObject::create(1, 1, this, this, true);
         ghost->setPosition({ 0.f, 105.f });
@@ -95,6 +102,11 @@ class $modify(PBPlayLayer, PlayLayer) {
 // ---------------------------------------------------------------------------
 
 class $modify(PBBaseGameLayer, GJBaseGameLayer) {
+    static void onModify(auto& self) {
+        (void)self.setHookPriorityPre("GJBaseGameLayer::collisionCheckObjects", Priority::First);
+        (void)self.setHookPriorityPre("GJBaseGameLayer::gameEventTriggered", Priority::First);
+    }
+
     void handleButton(bool down, int button, bool isPlayer1) {
         auto pl = PlayLayer::get();
         if (pl && static_cast<GJBaseGameLayer*>(pl) == this) {
@@ -111,123 +123,39 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
             return GJBaseGameLayer::collisionCheckObjects(player, objects, count, dt);
         }
 
-        // GD's own collision pass is never used for ghosts: it records every
-        // block and spike a ghost touches in the level's bookkeeping for the
-        // real player, and then won't save your PB. Instead the ghost reacts
-        // to blocks and slopes through its own player physics, spikes are
-        // checked by hand, and GD's pass only gets an empty list.
-        std::vector<GameObject*> solids;
-        std::vector<GameObject*> slopes;
+        // Same object set as the original mod: blocks, slopes, spikes, collision
+        // objects, all through GD's real collision code. Portals/pads/orbs end
+        // the run instead (checked after, from cached hitboxes).
+        static int depth = 0;
+        static gd::vector<GameObject*> shared;
+        gd::vector<GameObject*> local;
+        auto& filtered = depth == 0 ? shared : local;
+        filtered.clear();
         std::vector<GameObject*> stops;
-        std::vector<GameObject*> hazards;
 
         int n = std::min<int>(count, static_cast<int>(objects->size()));
         for (int i = 0; i < n; ++i) {
             auto obj = (*objects)[i];
-            if (!obj || obj->m_isGroupDisabled) continue;
+            if (!obj) continue;
             switch (obj->m_objectType) {
+                case GameObjectType::Solid:
                 case GameObjectType::Hazard:
                 case GameObjectType::AnimatedHazard:
-                    hazards.push_back(obj);
-                    break;
-                case GameObjectType::Solid:
-                    solids.push_back(obj);
-                    break;
                 case GameObjectType::Slope:
-                    slopes.push_back(obj);
-                    break;
                 case GameObjectType::CollisionObject:
+                    filtered.push_back(obj);
                     break;
                 default:
-                    // Portals/pads/orbs: checked below, from cached hitboxes.
                     if (pb::stopsSimulation(obj, player)) stops.push_back(obj);
                     break;
             }
         }
 
-        static gd::vector<GameObject*> empty;
-        empty.clear();
-        GJBaseGameLayer::collisionCheckObjects(player, &empty, 0, dt);
+        depth++;
+        GJBaseGameLayer::collisionCheckObjects(player, &filtered, static_cast<int>(filtered.size()), dt);
+        depth--;
 
-        // Slopes can't be modeled without GD's collision code: unknown, not a death.
-        for (auto obj : slopes) {
-            if (player->getObjectRect().intersectsRect(obj->getObjectRect())) {
-                pb::g_simStopped = true;
-                return;
-            }
-        }
-        // Blocks, by plain math: coming down onto a block lands on it, coming
-        // up into one lands on its underside (modes that can ride ceilings),
-        // anything else is a crash. Nothing here calls GD with the block.
-        int gi = pb::ghostIndex(player);
-        bool flipped = player->m_isUpsideDown;
-        bool ridesCeiling = player->m_isShip || player->m_isBird || player->m_isBall
-            || player->m_isDart || player->m_isSwing || player->m_isSpider;
-        // Work from our own box (centered on the position) so moving the ghost
-        // below is reflected right away.
-        CCRect start = player->getObjectRect();
-        float w = start.size.width, h = start.size.height;
-        float half = h / 2.f;
-        float prevY = gi >= 0 ? pb::g_prevPos[gi].y : player->getPositionY();
-        auto myBox = [&] {
-            auto p = player->getPosition();
-            return CCRect(p.x - w / 2.f, p.y - half, w, h);
-        };
-        for (auto obj : solids) {
-            CCRect box = obj->getObjectRect();
-            CCRect me = myBox();
-            if (!me.intersectsRect(box)) continue;
-            // Decided by where the ghost was last step, not by its speed: was it
-            // above the block's top, or below its underside?
-            bool fromAbove = prevY - half >= box.getMaxY() - 4.f;
-            bool fromBelow = prevY + half <= box.getMinY() + 4.f;
-            bool topIsGround = !flipped;   // normal gravity stands on tops
-            // Landing on a block counts as landing on the ground, through the
-            // same GD call the level floor uses (no block passed), so the ghost
-            // can jump off blocks exactly like the real player.
-            if (fromAbove && (topIsGround || ridesCeiling)) {
-                player->setPosition({ player->getPositionX(), box.getMaxY() + half });
-                player->m_yVelocity = 0.f;
-                if (topIsGround) player->hitGround(nullptr, true);
-            }
-            else if (fromBelow && (!topIsGround || ridesCeiling)) {
-                player->setPosition({ player->getPositionX(), box.getMinY() - half });
-                player->m_yVelocity = 0.f;
-                if (!topIsGround) player->hitGround(nullptr, false);
-            }
-            else {
-                // Like GD: brushing a block with the outer box is fine, you only
-                // crash when the small inner hitbox goes into it.
-                CCRect inner = myBox();
-                float iw = inner.size.width * 0.3f, ih = inner.size.height * 0.3f;
-                inner = CCRect(inner.getMidX() - iw / 2.f, inner.getMidY() - ih / 2.f, iw, ih);
-                if (inner.intersectsRect(box)) {
-                    pb::g_simDied = true;
-                    return;
-                }
-            }
-        }
-
-        CCRect ghostBox = myBox();
-        for (auto obj : hazards) {
-            CCRect box = obj->getObjectRect();
-            bool hit;
-            if (obj->m_objectRadius > 0.f) {
-                // Round hitbox (saws): closest point of the ghost's box to the center.
-                float cx = box.getMidX(), cy = box.getMidY();
-                float px = std::clamp(cx, ghostBox.getMinX(), ghostBox.getMaxX());
-                float py = std::clamp(cy, ghostBox.getMinY(), ghostBox.getMaxY());
-                float r = obj->m_objectRadius;
-                hit = (px - cx) * (px - cx) + (py - cy) * (py - cy) <= r * r;
-            }
-            else {
-                hit = ghostBox.intersectsRect(box);
-            }
-            if (hit) {
-                pb::g_simDied = true;
-                return;
-            }
-        }
+        CCRect const& ghostBox = player->m_objectRect;
         for (auto obj : stops) {
             if (ghostBox.intersectsRect(obj->m_objectRect)) {
                 pb::g_simStopped = true;
