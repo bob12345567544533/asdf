@@ -160,26 +160,40 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
         // up into one lands on its underside (modes that can ride ceilings),
         // anything else is a crash. Nothing here calls GD with the block.
         int gi = pb::ghostIndex(player);
-        float prevY = gi >= 0 ? pb::g_prevPos[gi].y : player->getPositionY();
         bool flipped = player->m_isUpsideDown;
         bool ridesCeiling = player->m_isShip || player->m_isBird || player->m_isBall
             || player->m_isDart || player->m_isSwing || player->m_isSpider;
+        // Work from our own box (centered on the position) so moving the ghost
+        // below is reflected right away.
+        CCRect start = player->getObjectRect();
+        float w = start.size.width, h = start.size.height;
+        float half = h / 2.f;
+        float prevY = gi >= 0 ? pb::g_prevPos[gi].y : player->getPositionY();
+        auto myBox = [&] {
+            auto p = player->getPosition();
+            return CCRect(p.x - w / 2.f, p.y - half, w, h);
+        };
         for (auto obj : solids) {
-            CCRect me = player->getObjectRect();
             CCRect box = obj->getObjectRect();
+            CCRect me = myBox();
             if (!me.intersectsRect(box)) continue;
-            float half = me.size.height / 2.f;
-            bool fromAbove = prevY - half >= box.getMaxY() - 2.f;
-            bool fromBelow = prevY + half <= box.getMinY() + 2.f;
-            if (fromAbove && (flipped ? ridesCeiling : true) && player->m_yVelocity <= 0.f) {
+            // Decided by where the ghost was last step, not by its speed: was it
+            // above the block's top, or below its underside?
+            bool fromAbove = prevY - half >= box.getMaxY() - 4.f;
+            bool fromBelow = prevY + half <= box.getMinY() + 4.f;
+            bool topIsGround = !flipped;   // normal gravity stands on tops
+            // Landing on a block counts as landing on the ground, through the
+            // same GD call the level floor uses (no block passed), so the ghost
+            // can jump off blocks exactly like the real player.
+            if (fromAbove && (topIsGround || ridesCeiling)) {
                 player->setPosition({ player->getPositionX(), box.getMaxY() + half });
                 player->m_yVelocity = 0.f;
-                if (!flipped) player->m_isOnGround = true;
+                if (topIsGround) player->hitGround(nullptr, true);
             }
-            else if (fromBelow && (flipped ? true : ridesCeiling) && player->m_yVelocity >= 0.f) {
+            else if (fromBelow && (!topIsGround || ridesCeiling)) {
                 player->setPosition({ player->getPositionX(), box.getMinY() - half });
                 player->m_yVelocity = 0.f;
-                if (flipped) player->m_isOnGround = true;
+                if (!topIsGround) player->hitGround(nullptr, false);
             }
             else {
                 pb::g_simDied = true;
@@ -187,7 +201,7 @@ class $modify(PBBaseGameLayer, GJBaseGameLayer) {
             }
         }
 
-        CCRect ghostBox = player->getObjectRect();
+        CCRect ghostBox = myBox();
         for (auto obj : hazards) {
             CCRect box = obj->getObjectRect();
             bool hit;

@@ -1,3 +1,6 @@
+# v1.6.1
+- Fixed the buffer sometimes doing nothing: the prediction now decides block landings by position instead of speed (upside-down sections especially), and the hidden copy can jump off blocks again, so longer and fixed delays work.
+
 # v1.6.0
 - Fixed PBs not saving with the buffer on. The hidden prediction runs no longer go through GD's collision code for blocks and spikes (which made GD drop the PB); they use their own math instead.
 - Near slopes the buffer now lets inputs through instead of predicting.
