@@ -3,7 +3,7 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v1.1.1",
+	"version": "v1.2.0",
 	"id": "ai.predictivebuffer",
 	"name": "Predictive Input Buffer",
 	"developer": "lilWC",
@@ -96,6 +96,40 @@
 		"show-feedback": {
 			"type": "bool",
 			"name": "Timing Popup",
+			"default": true
+		},
+		"improvements-title": {
+			"type": "title",
+			"name": "Improvements",
+			"description": "Each one can be switched off on its own. Classic turns them all off (exactly the previous version)."
+		},
+		"classic": {
+			"type": "bool",
+			"name": "Classic (all improvements off)",
+			"default": false
+		},
+		"fresh-ghost": {
+			"type": "bool",
+			"name": "Fresh Ghost",
+			"description": "Fully resets the hidden ghost before every check, so the same situation always gives the same answer.",
+			"default": true
+		},
+		"stop-at-portals": {
+			"type": "bool",
+			"name": "Stop At Portals / Pads / Orbs",
+			"description": "The ghost can't use portals, pads or orbs, so a check that reaches one counts as unknown instead of flying through it.",
+			"default": true
+		},
+		"smart-safety": {
+			"type": "bool",
+			"name": "Smart Safety",
+			"description": "Cube-like modes: looks a bit further ahead and prefers delays where the jump fully clears or lands, falling back to the old rule if none does.",
+			"default": true
+		},
+		"steady-timing": {
+			"type": "bool",
+			"name": "Steady Timing (Click Between Frames)",
+			"description": "Runs the ghost at the full step size and counts the delay in full steps, so Click Between Frames' split steps don't throw it off.",
 			"default": true
 		}
 	}

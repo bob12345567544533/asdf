@@ -47,6 +47,17 @@ int g_randomize = 3;
 bool g_releases = true;
 bool g_ship = false;
 int g_lastAttempt = -1;
+// Improvements (each can be switched off; "classic" turns them all off).
+bool g_freshGhost = true;     // fully reset the ghost before every check
+bool g_stopPortals = true;    // portals / pads / orbs end a check as "unknown"
+bool g_smartSafety = true;    // cube-like modes: prefer delays that fully land
+bool g_steadyTiming = true;   // Click Between Frames: full-step ghost speed and delay count
+bool g_simStopped = false;    // a ghost reached a portal / pad / orb
+bool g_simHeld[2] { false, false };
+float g_fullDt = 0.25f;       // largest recent step (a split step is smaller)
+float g_recentDt[16] {};
+int g_recentDtIndex = 0;
+float g_stepAccum = 0.f;
 int g_pending = -1;        // >= 0: steps until the held-back input fires
 bool g_pendingDown = true;
 bool g_flipAfter = false;  // the opposite input came in while one was held back
@@ -63,6 +74,67 @@ void readSettings() {
     g_randomize = static_cast<int>(mod->getSettingValue<int64_t>("randomize"));
     g_releases = mod->getSettingValue<bool>("buffer-releases");
     g_ship = mod->getSettingValue<bool>("buffer-ship");
+    bool classic = mod->getSettingValue<bool>("classic");
+    g_freshGhost = !classic && mod->getSettingValue<bool>("fresh-ghost");
+    g_stopPortals = !classic && mod->getSettingValue<bool>("stop-at-portals");
+    g_smartSafety = !classic && mod->getSettingValue<bool>("smart-safety");
+    g_steadyTiming = !classic && mod->getSettingValue<bool>("steady-timing");
+}
+
+// Portals, pads and teleports act on contact (speed portals only if the speed
+// changes); orbs only while the button is held. The ghost can't use them, so a
+// check that reaches one can't be judged.
+bool stopsGhost(GameObject* object, PlayerObject* ghost, bool held) {
+    float speed = 0.f;
+    switch (object->m_objectID) {
+        case 200: speed = 0.7f; break;
+        case 201: speed = 0.9f; break;
+        case 202: speed = 1.1f; break;
+        case 203: speed = 1.3f; break;
+        case 1334: speed = 1.6f; break;
+        default: break;
+    }
+    if (speed > 0.f) return std::abs(ghost->m_playerSpeed - speed) > 0.01f;
+    switch (object->m_objectType) {
+        case GameObjectType::InverseGravityPortal:
+        case GameObjectType::NormalGravityPortal:
+        case GameObjectType::GravityTogglePortal:
+        case GameObjectType::ShipPortal:
+        case GameObjectType::CubePortal:
+        case GameObjectType::BallPortal:
+        case GameObjectType::UfoPortal:
+        case GameObjectType::WavePortal:
+        case GameObjectType::RobotPortal:
+        case GameObjectType::SpiderPortal:
+        case GameObjectType::SwingPortal:
+        case GameObjectType::InverseMirrorPortal:
+        case GameObjectType::NormalMirrorPortal:
+        case GameObjectType::RegularSizePortal:
+        case GameObjectType::MiniSizePortal:
+        case GameObjectType::DualPortal:
+        case GameObjectType::SoloPortal:
+        case GameObjectType::TeleportPortal:
+        case GameObjectType::YellowJumpPad:
+        case GameObjectType::PinkJumpPad:
+        case GameObjectType::RedJumpPad:
+        case GameObjectType::GravityPad:
+        case GameObjectType::SpiderPad:
+            return true;
+        case GameObjectType::YellowJumpRing:
+        case GameObjectType::PinkJumpRing:
+        case GameObjectType::RedJumpRing:
+        case GameObjectType::GravityRing:
+        case GameObjectType::GreenRing:
+        case GameObjectType::DropRing:
+        case GameObjectType::CustomRing:
+        case GameObjectType::DashRing:
+        case GameObjectType::GravityDashRing:
+        case GameObjectType::SpiderOrb:
+        case GameObjectType::TeleportOrb:
+            return held;
+        default:
+            return false;
+    }
 }
 
 int modeIndex(PlayerObject* p) {
@@ -109,6 +181,17 @@ void setupGhost(PlayerObject* ghost, PlayerObject* real) {
 void setButton(PlayerObject* ghost, bool down) {
     if (down) ghost->pushButton(PlayerButton::Jump);
     else ghost->releaseButton(PlayerButton::Jump);
+    if (ghost == g_ghost1) g_simHeld[0] = down;
+    else if (ghost == g_ghost2) g_simHeld[1] = down;
+}
+
+// Clears what a previous check left on the ghost (held buttons, touched orbs,
+// a dash, a death), so every check starts the same way.
+void freshen(PlayerObject* ghost) {
+    ghost->releaseAllButtons();
+    ghost->resetTouchedRings(true);
+    if (ghost->m_isDashing) ghost->stopDashing();
+    ghost->m_isDead = false;
 }
 
 void clearLogs(PlayerObject* ghost) {
@@ -123,13 +206,20 @@ void clearLogs(PlayerObject* ghost) {
 // input it survived (`horizon` if it never died). `diedBeforeInput` is set if
 // it died before the input even went in.
 int simulate(PlayLayer* pl, PlayerObject* real1, PlayerObject* real2, bool dual,
-             int delay, bool down, int horizon, bool* diedBeforeInput) {
+             int delay, bool down, int horizon, bool* diedBeforeInput, bool* stopped) {
     *diedBeforeInput = false;
+    *stopped = false;
     if (!g_ghost1) return horizon;
 
     g_sim = true;
     g_simDied = false;
+    g_simStopped = false;
+    g_simHeld[0] = g_simHeld[1] = false;
 
+    if (g_freshGhost) {
+        freshen(g_ghost1);
+        if (dual && g_ghost2 && real2) freshen(g_ghost2);
+    }
     setupGhost(g_ghost1, real1);
     if (dual && g_ghost2 && real2) setupGhost(g_ghost2, real2);
 
@@ -153,6 +243,13 @@ int simulate(PlayLayer* pl, PlayerObject* real1, PlayerObject* real2, bool dual,
     }
 
     float dt = (g_dt > 0.001f && g_dt < 2.f) ? g_dt : 0.25f;
+    if (g_steadyTiming) {
+        // A Click Between Frames split step is shorter than a real one; run the
+        // ghost at the full step size instead.
+        float warp = pl->m_gameState.m_timeWarp;
+        float full = warp > 0.f ? g_fullDt / warp : g_fullDt;
+        if (full > 0.001f && full < 2.f) dt = full;
+    }
     int grounded = 0;
     int airborne = 0;
 
@@ -189,6 +286,11 @@ int simulate(PlayLayer* pl, PlayerObject* real1, PlayerObject* real2, bool dual,
                 g_sim = false;
                 return stepsAfter;
             }
+        }
+        if (g_simStopped) {
+            *stopped = true;
+            g_sim = false;
+            return stepsAfter;
         }
 
         if (step < delay) continue;
@@ -413,16 +515,23 @@ class $modify(GJBaseGameLayer) {
 
         char const* kind = down ? "PRESS" : "RELEASE";
         g_flipAfter = false;
-        int horizon = miniWave ? 28 : (anyWave ? 38 : 48);
+        bool flyingNow = p1->m_isDart || p1->m_isBird || p1->m_isSwing
+            || (hasP2 && (p2->m_isDart || p2->m_isBird || p2->m_isSwing));
+        // Smart safety looks a bit further ahead in cube-like modes.
+        int horizon = miniWave ? 28 : (anyWave ? 38 : ((g_smartSafety && !flyingNow) ? 64 : 48));
         int limit = anyWave ? g_limitWave : g_limitAll;
 
         bool before = false;
-        int base = simulate(pl, p1, p2, dual, 0, down, horizon, &before);
-        if (base >= horizon || limit <= 0) return passThrough();
+        bool stopped = false;
+        int base = simulate(pl, p1, p2, dual, 0, down, horizon, &before, &stopped);
+        // A portal / pad / orb ahead: can't judge, leave the input alone.
+        if (stopped || base >= horizon || limit <= 0) return passThrough();
 
         // The original's safety rule for a delay of d ticks (wave gets stricter
-        // as d grows; same numbers as its own search).
-        auto safe = [&](int d, int r) {
+        // as d grows; same numbers as its own search). A check that reached a
+        // portal / pad / orb counts if it got there no sooner than you'd die now.
+        auto lenient = [&](int d, int r, bool hitStop) {
+            if (hitStop) return r > 0 && r >= base;
             if (anyWave) {
                 int need = base + 10 + 2 * (d - 1);
                 int gain = 6 + 2 * (d - 1);
@@ -430,36 +539,66 @@ class $modify(GJBaseGameLayer) {
             }
             return r >= std::min(base + 12, horizon);
         };
+        // Smart safety (cube-like modes): the delayed jump must fully clear the
+        // look-ahead or land safely, not just live a bit longer.
+        auto strict = [&](int d, int r, bool hitStop) {
+            if (!g_smartSafety || flyingNow) return lenient(d, r, hitStop);
+            if (hitStop) return r > 0 && r >= base;
+            return r >= horizon;
+        };
 
-        // Randomize: start the original's search at a random delay (+0 to +3
-        // above where it normally starts) and take the first safe delay from
-        // there. Every run before the pick is a failed one, exactly like the
-        // original's search, so no run starts from a ghost left over from a
-        // successful run. Nothing safe from there up: normal search from 1.
+        // Randomize: start the search at a random delay (+0 to +N above 1) and
+        // take the first safe delay from there; nothing safe from there up:
+        // search from 1. With smart safety, a delay that only passes the
+        // original's rule is kept as a backup in case no delay fully clears.
         int first = 1; // always from 1 tick, like the original
         int offset = g_randomize > 0 ? std::uniform_int_distribution<int>(0, g_randomize)(rng()) : 0;
         int start = std::min(first + offset, limit);
         int chosen = 0;
         int result = 0;
+        int backup = 0;
+        int backupResult = 0;
         bool fallback = false;
+        auto tryDelay = [&](int d, bool& stop) {
+            bool hitStop = false;
+            int r = simulate(pl, p1, p2, dual, d, down, horizon, &before, &hitStop);
+            if (before) {
+                stop = true;
+                return false;
+            }
+            if (strict(d, r, hitStop)) {
+                result = r;
+                return true;
+            }
+            if (!backup && lenient(d, r, hitStop)) {
+                backup = d;
+                backupResult = r;
+            }
+            return false;
+        };
         for (int d = start; d <= limit; ++d) {
-            result = simulate(pl, p1, p2, dual, d, down, horizon, &before);
-            if (before) break;
-            if (safe(d, result)) {
+            bool stop = false;
+            if (tryDelay(d, stop)) {
                 chosen = d;
                 break;
             }
+            if (stop) break;
         }
         if (chosen <= 0 && start > first) {
-            fallback = true;
             for (int d = first; d < start; ++d) {
-                result = simulate(pl, p1, p2, dual, d, down, horizon, &before);
-                if (before) return passThrough();
-                if (safe(d, result)) {
+                bool stop = false;
+                if (tryDelay(d, stop)) {
                     chosen = d;
+                    fallback = true;
                     break;
                 }
+                if (stop) break;
             }
+            if (chosen <= 0 && !backup) fallback = true;
+        }
+        if (chosen <= 0 && backup) {
+            chosen = backup;
+            result = backupResult;
         }
         if (chosen <= 0) return passThrough();
         bool random = g_randomize > 0 && !fallback;
@@ -489,7 +628,15 @@ class $modify(GJBaseGameLayer) {
             auto obj = (*objects)[i];
             if (!obj) continue;
             auto type = static_cast<unsigned>(obj->m_objectType);
-            if (type <= 47 && ((0x808002000005ull >> type) & 1)) filtered.push_back(obj);
+            if (type <= 47 && ((0x808002000005ull >> type) & 1)) {
+                filtered.push_back(obj);
+            }
+            else if (g_stopPortals && !g_simStopped) {
+                bool held = player == g_ghost1 ? g_simHeld[0] : player == g_ghost2 ? g_simHeld[1] : false;
+                if (stopsGhost(obj, player, held) && player->getObjectRect().intersectsRect(obj->getObjectRect())) {
+                    g_simStopped = true;
+                }
+            }
         }
         GJBaseGameLayer::collisionCheckObjects(player, &filtered, static_cast<int>(filtered.size()), dt);
     }
@@ -555,6 +702,25 @@ class $modify(PlayerObject) {
                 if (pl->m_attempts != g_lastAttempt) {
                     g_lastAttempt = pl->m_attempts;
                     pb::menu::attempt(g_lastAttempt);
+                    g_stepAccum = 0.f;
+                }
+
+                // Full step size = the largest recent step (a Click Between
+                // Frames split step is smaller).
+                g_recentDt[g_recentDtIndex] = dt;
+                g_recentDtIndex = (g_recentDtIndex + 1) % 16;
+                g_fullDt = *std::max_element(std::begin(g_recentDt), std::end(g_recentDt));
+
+                // Steady timing: a held-back input counts down once per full
+                // step, so a split step doesn't make the delay a tick short.
+                bool countStep = true;
+                if (g_steadyTiming && g_pending >= 0 && g_fullDt > 0.f) {
+                    g_stepAccum += dt;
+                    if (g_stepAccum + 1e-4f >= g_fullDt) g_stepAccum -= g_fullDt;
+                    else countStep = false;
+                }
+                else {
+                    g_stepAccum = 0.f;
                 }
                 if (g_enabled) {
                     if (g_counter <= 998) g_counter++;
@@ -564,6 +730,9 @@ class $modify(PlayerObject) {
                         g_pending = -1;
                         g_flipAfter = false;
                         if (g_held != g_lastDown) feed(pl, g_held);
+                    }
+                    else if (g_pending >= 0 && !countStep) {
+                        // Part of a split step: wait for the rest of it.
                     }
                     else if (g_pending == 0) {
                         feed(pl, g_pendingDown);
