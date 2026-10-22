@@ -202,9 +202,15 @@ public:
     void check(float) {
         auto pl = PlayLayer::get();
         if (pl && !pl->m_isPaused) return; // GD hides it while you play
+        // GD's own calls (what it does when you pause): unlock and show.
+        if (auto view = CCEGLView::get()) {
+            view->toggleLockCursor(false);
+            view->showCursor(true);
+        }
         CURSORINFO info { sizeof(info) };
-        if (!GetCursorInfo(&info) || (info.flags & CURSOR_SHOWING)) return;
-        for (int i = 0; i < 16 && ShowCursor(TRUE) < 0; ++i) {}
+        if (GetCursorInfo(&info) && !(info.flags & CURSOR_SHOWING)) {
+            for (int i = 0; i < 16 && ShowCursor(TRUE) < 0; ++i) {}
+        }
     }
 };
 #endif
