@@ -3,7 +3,7 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v1.2.0",
+	"version": "v1.3.0",
 	"id": "chaz.minimal-helper",
 	"name": "Minimal Helper",
 	"developer": "chaz",
@@ -64,7 +64,7 @@
 		"equal-pause-buttons": {
 			"type": "bool",
 			"name": "Same size side buttons",
-			"description": "Every button on the left and right of the pause menu, and on the left of the icon kit, gets the same size.",
+			"description": "Buttons on the sides of the pause menu, the left of the icon kit and the bottom left of a level page all get the same size.",
 			"default": true
 		},
 		"square-play-loading": {
@@ -77,6 +77,12 @@
 			"type": "bool",
 			"name": "Rounded slider fill",
 			"description": "Volume sliders and the loading bar get a fill with rounded ends that matches the groove.",
+			"default": true
+		},
+		"tidy-popups": {
+			"type": "bool",
+			"name": "Tidy comments popup",
+			"description": "The close, report and comment buttons of the comments popup sit inside its corners instead of hanging over the edge.",
 			"default": true
 		}
 	}

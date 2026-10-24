@@ -12,9 +12,11 @@
 // 6. Level page: GD's round loading ring becomes a thin square around the play box.
 // 7. Sliders and the loading bar: the fill gets rounded ends like the groove.
 // 8. Loading screen: the menu nebula instead of GD's blue squares.
+// 9. Comments popup: the close / report / comment buttons sit inside its corners.
 
 #include <Geode/Geode.hpp>
 #include <Geode/modify/GJGarageLayer.hpp>
+#include <Geode/modify/InfoLayer.hpp>
 #include <Geode/modify/LevelBrowserLayer.hpp>
 #include <Geode/modify/LevelInfoLayer.hpp>
 #include <Geode/modify/LoadingLayer.hpp>
@@ -391,6 +393,8 @@ void visit(CCNode* node, Visit& v, int depth) {
     // big containers (lists, object layers) never hold the background
     if (!children || children->count() > 200) return;
     for (auto child : CCArrayExt<CCNode*>(children)) {
+        // never look inside a level (play / editor): nothing to animate there
+        if (typeinfo_cast<GJBaseGameLayer*>(child)) continue;
         std::string_view id = child->getID();
         bool nebula = endsWith(id, "chaz-bg");
         bool gradient = false;
@@ -423,25 +427,45 @@ void visit(CCNode* node, Visit& v, int depth) {
     }
 }
 
+void visitScene(CCScene* scene, Visit& v) {
+    if (!scene) return;
+    // during a fade both screens are drawn by the transition, not as children
+    if (auto transition = typeinfo_cast<CCTransitionScene*>(scene)) {
+        visit(transition->m_pInScene, v, 0);
+        visit(transition->m_pOutScene, v, 0);
+    }
+    visit(scene, v, 0);
+}
+
+// The main menu's "made by chaz" tag would show through the settings screen,
+// right behind its title: hide it while settings are open.
+void tidyMenuTitle(CCScene* scene) {
+    auto menu = scene ? scene->getChildByType<MenuLayer>(0) : nullptr;
+    if (!menu || !menu->getChildren()) return;
+    for (auto child : CCArrayExt<CCNode*>(menu->getChildren())) {
+        if (endsWith(child->getID(), "chaz-title")) {
+            bool settingsOpen = scene->getChildByType<OptionsLayer>(0) || menu->getChildByType<OptionsLayer>(0);
+            child->setVisible(!settingsOpen);
+            return;
+        }
+    }
+}
+
 class BackgroundDriver : public CCObject {
 public:
     void tick(float dt) {
         g_clock += std::min(dt, 0.1f);
-        if (!setting("continuous-background")) return;
-        // nothing to animate while playing or editing a level
-        if (PlayLayer::get() || LevelEditorLayer::get()) return;
         auto director = CCDirector::get();
         auto scene = director->getRunningScene();
-        if (!scene) return;
+        tidyMenuTitle(scene);
+        if (!setting("continuous-background")) return;
         Visit v;
         v.win = director->getWinSize();
         v.flow = flowEnabled() ? flowTexture() : nullptr;
-        // during a fade both screens are drawn by the transition, not as children
-        if (auto transition = typeinfo_cast<CCTransitionScene*>(scene)) {
-            visit(transition->m_pInScene, v, 0);
-            visit(transition->m_pOutScene, v, 0);
-        }
-        visit(scene, v, 0);
+        visitScene(scene, v);
+        // a screen that's about to appear: set it up before its first frame is drawn
+        auto next = director->getNextScene();
+        if (next && next != scene) visitScene(next, v);
         if (v.flow && v.foundBackground) drawFlow();
     }
 };
@@ -473,7 +497,9 @@ void goToMenu() {
 // 5. Same size side buttons
 // ---------------------------------------------------------------------------
 
-// Every visible button in `menu` gets the same size: its longest side becomes `size` points.
+// Every visible button in `menu` gets the same size: its box becomes `size` points wide.
+// The pack draws each box as a square filling the shorter side of its image, so the
+// shorter side is the box size (images can have extra empty space the other way).
 void equalizeButtons(CCNode* menu, float size) {
     if (!menu || !menu->getChildren()) return;
     bool changed = false;
@@ -481,8 +507,8 @@ void equalizeButtons(CCNode* menu, float size) {
         auto button = typeinfo_cast<CCMenuItemSpriteExtra*>(item);
         if (!button || !button->isVisible() || button->isSelected()) continue;
         auto content = button->getContentSize();
-        float longest = std::max(content.width, content.height);
-        if (longest <= 0) continue;
+        float side = std::min(content.width, content.height);
+        if (side <= 0) continue;
         // these menus use an auto-scaling layout that resets every button's scale
         // whenever it updates, so take the buttons out of its auto-scaling
         auto options = button->getLayoutOptions();
@@ -496,7 +522,7 @@ void equalizeButtons(CCNode* menu, float size) {
                 changed = true;
             }
         }
-        float scale = size / longest;
+        float scale = size / side;
         if (std::abs(button->getScale() - scale) > 0.001f || std::abs(button->m_baseScale - scale) > 0.001f) {
             button->setScale(scale);
             button->m_baseScale = scale;
@@ -507,6 +533,8 @@ void equalizeButtons(CCNode* menu, float size) {
 }
 
 constexpr float SIDE_BUTTON_SIZE = 34.f; // GD points, same in the pause menu and the icon kit
+constexpr float LEVEL_CORNER_BUTTON_SIZE = 30.f; // level page bottom-left (4 buttons close together)
+constexpr float POPUP_CORNER_BUTTON_SIZE = 28.f; // comments popup corners, same as its side buttons
 
 // ---------------------------------------------------------------------------
 // 7. Rounded fill (sliders, loading bar)
@@ -525,13 +553,23 @@ void roundFill(CCSprite* bar, CCNode* groove) {
     auto g = rectIn(parent, groove);
     float h = g.size.height;
     if (h <= 0.f || bar->getScaleX() == 0.f || bar->getScaleY() == 0.f) return;
-    float r = h * 0.22f;                       // fill is 44% of the groove height
+    float r = h * 0.22f;                         // fill is 44% of the groove height
     float cy = g.getMidY();
-    float leftC = g.getMinX() + h / 2;         // same center as the groove's end curve
-    float rightLimit = g.getMaxX() - h / 2;
+    float leftEdge = g.getMinX() + h / 2 - r;    // even gap to the groove's end curve
+    float rightMax = g.getMaxX() - h / 2 + r;
+    // the fill is exactly as full as GD's strip (which ends under the knob's center);
+    // when it gets shorter than it is tall it shrinks into a smaller and smaller dot,
+    // so even tiny values stay visible and accurate
     auto b = bar->boundingBox();
-    float rightC = std::clamp(b.getMaxX() - r, leftC, std::max(leftC, rightLimit));
-    bool show = b.size.width > 0.5f;
+    float inset = std::max(0.f, b.getMinX() - g.getMinX());
+    float fullWidth = g.size.width - 2 * inset;
+    float t = fullWidth > 0.f ? std::clamp(b.size.width / fullWidth, 0.f, 1.f) : 0.f;
+    float length = t * (rightMax - leftEdge);
+    float right = leftEdge + length;
+    bool show = length > 0.05f;
+    float d = std::clamp(length, 0.01f, 2 * r); // cap diameter
+    float leftC = leftEdge + d / 2;
+    float rightC = std::max(leftC, right - d / 2);
 
     bar->setCascadeOpacityEnabled(false);
     bar->setOpacity(0);
@@ -572,19 +610,20 @@ void roundFill(CCSprite* bar, CCNode* groove) {
     auto mid = part("fill-middle"_spr, true);
     if (!left || !right || !mid) return;
 
+    float span = rightC - leftC;
     for (auto cap : { left, right }) {
-        cap->setVisible(show);
-        cap->setScaleX(2 * r / texSize.width * sx);
-        cap->setScaleY(2 * r / texSize.height * sy);
+        cap->setScaleX(d / texSize.width * sx);
+        cap->setScaleY(d / texSize.height * sy);
     }
+    left->setVisible(show);
+    right->setVisible(show && span > 0.01f);
     left->setPosition(local(leftC, cy));
     right->setPosition(local(rightC, cy));
 
-    float span = rightC - leftC;
     mid->setVisible(show && span > 0.01f);
     mid->setPosition(local((leftC + rightC) / 2, cy));
     mid->setScaleX(std::max(span, 0.01f) / (2 * onePx) * sx);
-    mid->setScaleY(2 * r / texSize.height * sy);
+    mid->setScaleY(d / texSize.height * sy);
 }
 
 // ---------------------------------------------------------------------------
@@ -786,6 +825,19 @@ class $modify(ChazLevelInfoLayer, LevelInfoLayer) {
         bool m_watching = false;
     };
 
+    bool init(GJGameLevel* level, bool challenge) {
+        if (!LevelInfoLayer::init(level, challenge)) return false;
+        if (setting("equal-pause-buttons")) {
+            // bottom-left corner: settings, mod buttons, info, favorite
+            every(this, 0.25f, [this] {
+                for (auto id : { "settings-menu", "garage-menu", "other-menu", "left-side-menu" }) {
+                    equalizeButtons(this->getChildByID(id), LEVEL_CORNER_BUTTON_SIZE);
+                }
+            });
+        }
+        return true;
+    }
+
     void onPlay(CCObject* sender) {
         LevelInfoLayer::onPlay(sender);
         if (!setting("square-play-loading")) return;
@@ -848,5 +900,49 @@ class $modify(ChazSlider, Slider) {
     void updateBar() {
         Slider::updateBar();
         if (setting("round-fill")) roundFill(m_sliderBar, m_groove);
+    }
+};
+
+// ---------------------------------------------------------------------------
+// 9. Comments popup: corner buttons inside the popup
+// ---------------------------------------------------------------------------
+
+// GD puts the close, report and comment buttons half outside the popup's corners,
+// which looks broken with square boxes. Move them just inside the corners and give
+// them the same size as the popup's other side buttons.
+class $modify(ChazInfoLayer, InfoLayer) {
+    bool init(GJGameLevel* level, GJUserScore* score, GJLevelList* list) {
+        if (!InfoLayer::init(level, score, list)) return false;
+        if (setting("tidy-popups")) {
+            this->tidyCorners();
+            later(this, 0.05f, [this] { this->tidyCorners(); });
+        }
+        return true;
+    }
+
+    void tidyCorners() {
+        if (!m_mainLayer || !m_buttonMenu) return;
+        auto bg = m_mainLayer->getChildByID("background");
+        if (!bg) return;
+        auto box = rectIn(m_buttonMenu, bg);
+        constexpr float margin = 6.f;
+        float inset = margin + POPUP_CORNER_BUTTON_SIZE / 2;
+        struct Corner { char const* id; float x; float y; };
+        Corner corners[] = {
+            { "close-button", box.getMinX() + inset, box.getMaxY() - inset },
+            { "report-button", box.getMinX() + inset, box.getMinY() + inset },
+            { "comment-button", box.getMaxX() - inset, box.getMinY() + inset },
+        };
+        for (auto const& corner : corners) {
+            auto button = typeinfo_cast<CCMenuItemSpriteExtra*>(m_buttonMenu->getChildByID(corner.id));
+            if (!button) continue;
+            auto content = button->getContentSize();
+            float side = std::min(content.width, content.height);
+            if (side <= 0) continue;
+            float scale = POPUP_CORNER_BUTTON_SIZE / side;
+            button->setScale(scale);
+            button->m_baseScale = scale;
+            button->setPosition({ corner.x, corner.y });
+        }
     }
 };
