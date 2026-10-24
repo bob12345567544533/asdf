@@ -29,6 +29,8 @@ jobs:
 
     name: ${{ matrix.config.name }}
     runs-on: ${{ matrix.config.os }}
+    permissions:
+      contents: write # the compile errors release below
 
     steps:
       - uses: actions/checkout@v7
@@ -44,6 +46,22 @@ jobs:
           # Build the code generator from those bindings instead of downloading
           # the newest prebuilt one, which expects a newer Geode SDK than 5.11.2.
           configure-args: -DSKIP_BUILDING_CODEGEN=OFF
+
+      # When the build breaks, compile again with the output saved and publish
+      # it as the "debug-log-win" release (Actions logs can't always be read).
+      - name: Publish the compile errors
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $dir = Get-ChildItem -Directory -Filter "build*" | Select-Object -First 1
+          "build dir: $dir" | Out-File build-errors.log
+          cmake --build $dir --config RelWithDebInfo --parallel 1 2>&1 | Out-File -Append build-errors.log
+          cmake --build $dir --config Release --parallel 1 2>&1 | Out-File -Append build-errors.log
+          gh release delete debug-log-win --yes --cleanup-tag 2>$null
+          gh release create debug-log-win build-errors.log --title "Windows build errors" --notes "Compile output of the last failed build" --prerelease
 
   package:
     name: Package builds
