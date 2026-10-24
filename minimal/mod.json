@@ -3,16 +3,23 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v1.0.0",
+	"version": "v1.1.0",
 	"id": "chaz.minimal-helper",
 	"name": "Minimal Helper",
 	"developer": "chaz",
 	"description": "Companion for the Minimal texture pack: one continuous background animation across every menu, play button opens your favorite levels, and a few layout fixes.",
+	"early-load": true,
 	"settings": {
 		"continuous-background": {
 			"type": "bool",
 			"name": "Continuous background",
 			"description": "The nebula drift and star twinkle keep going smoothly when you switch screens instead of restarting.",
+			"default": true
+		},
+		"clean-loading-screen": {
+			"type": "bool",
+			"name": "Nebula loading screen",
+			"description": "The game's loading screen uses the menu nebula instead of the blue squares. Takes effect next time the game starts.",
 			"default": true
 		},
 		"play-opens-favorites": {
@@ -35,8 +42,20 @@
 		},
 		"equal-pause-buttons": {
 			"type": "bool",
-			"name": "Same size pause side buttons",
-			"description": "Makes every button on the left and right of the pause menu the same size.",
+			"name": "Same size side buttons",
+			"description": "Every button on the left and right of the pause menu, and on the left of the icon kit, gets the same size.",
+			"default": true
+		},
+		"square-play-loading": {
+			"type": "bool",
+			"name": "Square level loading",
+			"description": "When you press play on a level, the loading progress is a thin square around the play box instead of a ring on top of it.",
+			"default": true
+		},
+		"round-fill": {
+			"type": "bool",
+			"name": "Rounded slider fill",
+			"description": "Volume sliders and the loading bar get a fill with rounded ends that matches the groove.",
 			"default": true
 		}
 	}
