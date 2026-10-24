@@ -1,0 +1,43 @@
+{
+	"geode": "5.11.2",
+	"gd": {
+		"win": "2.2081"
+	},
+	"version": "v1.0.0",
+	"id": "chaz.minimal-helper",
+	"name": "Minimal Helper",
+	"developer": "chaz",
+	"description": "Companion for the Minimal texture pack: one continuous background animation across every menu, play button opens your favorite levels, and a few layout fixes.",
+	"settings": {
+		"continuous-background": {
+			"type": "bool",
+			"name": "Continuous background",
+			"description": "The nebula drift and star twinkle keep going smoothly when you switch screens instead of restarting.",
+			"default": true
+		},
+		"play-opens-favorites": {
+			"type": "bool",
+			"name": "Play opens favorite levels",
+			"description": "The big play button on the main menu opens your favorite levels. The main levels are in Settings.",
+			"default": true
+		},
+		"levels-in-settings": {
+			"type": "bool",
+			"name": "Main levels button in Settings",
+			"description": "Turns the Rate button in Settings into a Levels button that opens the main levels.",
+			"default": true
+		},
+		"clean-level-lists": {
+			"type": "bool",
+			"name": "Clean saved/favorite lists",
+			"description": "Hides the info button in the bottom left of saved and favorite levels and puts the heart there instead.",
+			"default": true
+		},
+		"equal-pause-buttons": {
+			"type": "bool",
+			"name": "Same size pause side buttons",
+			"description": "Makes every button on the left and right of the pause menu the same size.",
+			"default": true
+		}
+	}
+}

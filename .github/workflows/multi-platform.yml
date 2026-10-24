@@ -5,6 +5,11 @@ on:
   push:
     branches:
       - main
+    # the texture pack and its companion mod have their own build
+    paths-ignore:
+      - 'minimal/**'
+      - 'texturepack/**'
+      - '.github/workflows/minimal.yml'
 
 # A newer push to the same branch replaces the running build.
 concurrency:
