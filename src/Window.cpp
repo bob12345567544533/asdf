@@ -1087,6 +1087,14 @@ void windowThread() {
         return;
     }
     styleFrame(wnd);
+
+    // Hidden from screen capture, same as v1.x (WDA_EXCLUDEFROMCAPTURE, spelled
+    // out for older SDK headers). Windows older than 10 (2004) shows a black box instead.
+    constexpr DWORD EXCLUDE_FROM_CAPTURE = 0x00000011;
+    if (!SetWindowDisplayAffinity(wnd, EXCLUDE_FROM_CAPTURE)) {
+        SetWindowDisplayAffinity(wnd, WDA_MONITOR);
+    }
+
     g_window = wnd;
     takePending(wnd);
 
