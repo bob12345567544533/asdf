@@ -3,7 +3,7 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v1.1.0",
+	"version": "v1.2.0",
 	"id": "chaz.minimal-helper",
 	"name": "Minimal Helper",
 	"developer": "chaz",
@@ -15,6 +15,27 @@
 			"name": "Continuous background",
 			"description": "The nebula drift and star twinkle keep going smoothly when you switch screens instead of restarting.",
 			"default": true
+		},
+		"flowing-background": {
+			"type": "bool",
+			"name": "Flowing clouds background",
+			"description": "Menu backgrounds become slowly flowing clouds drawn live (no stars). Off = the texture pack's own nebula and stars.",
+			"default": true
+		},
+		"background-speed": {
+			"type": "float",
+			"name": "Cloud speed",
+			"description": "How fast the clouds flow. 1 = default.",
+			"default": 1.0,
+			"min": 0.25,
+			"max": 3.0,
+			"control": {
+				"slider": true,
+				"arrows": true,
+				"big-arrows": false,
+				"slider-step": 0.05,
+				"input": true
+			}
 		},
 		"clean-loading-screen": {
 			"type": "bool",

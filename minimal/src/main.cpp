@@ -37,9 +37,8 @@ bool setting(char const* key) {
     return Mod::get()->getSettingValue<bool>(key);
 }
 
-bool endsWith(std::string const& s, char const* suffix) {
-    std::string_view suf(suffix);
-    return s.size() >= suf.size() && s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
+bool endsWith(std::string_view s, std::string_view suffix) {
+    return s.size() >= suffix.size() && s.substr(s.size() - suffix.size()) == suffix;
 }
 
 // Run something on a node a little later (after other mods and Happy Textures
@@ -124,6 +123,216 @@ constexpr double TAU = 6.283185307179586;
 // drift, 9 s each way for the zoom, 1.1 s / 1.6 s each way for the two star layers.
 double g_clock = 0.0;
 
+// --- Flowing nebula ----------------------------------------------------------
+// Slowly flowing grayscale clouds drawn by a shader into a small texture (960 px
+// wide, refreshed up to 120 times a second), which every menu background then
+// shows. One shared texture + one clock = the same motion on every screen.
+
+constexpr char const* FLOW_VERT = R"(
+attribute vec4 a_position;
+varying vec2 v_pos;
+void main() {
+    gl_Position = CC_MVPMatrix * a_position;
+    v_pos = a_position.xy;
+}
+)";
+
+constexpr char const* FLOW_FRAG = R"(
+varying vec2 v_pos;
+uniform vec2 u_size;
+uniform vec4 u_offset;
+
+float hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float noise(vec2 x) {
+    vec2 i = floor(x);
+    vec2 f = fract(x);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    float a = hash12(i);
+    float b = hash12(i + vec2(1.0, 0.0));
+    float c = hash12(i + vec2(0.0, 1.0));
+    float d = hash12(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float fbm(vec2 p) {
+    float s = 0.0;
+    float amp = 1.0;
+    float tot = 0.0;
+    for (int i = 0; i < 5; i++) {
+        s += noise(p) * amp;
+        tot += amp;
+        p = mat2(1.6, 1.2, -1.2, 1.6) * p + vec2(17.1, 9.7);
+        amp *= 0.5;
+    }
+    return s / tot;
+}
+
+void main() {
+    vec2 uv = v_pos / u_size;
+    vec2 p = mat2(0.8, 0.6, -0.6, 0.8) * (v_pos / u_size.y * 2.25) + vec2(40.0, 40.0);
+    vec2 o = u_offset.xy;
+    vec2 q = vec2(fbm(p + o), fbm(p + vec2(5.2, 1.3) + vec2(-o.y, o.x)));
+    float v = fbm(p + 3.0 * q + u_offset.zw);
+    v = pow(smoothstep(0.36, 0.88, v), 1.5);
+    vec2 c = uv * 2.0 - 1.0;
+    float vign = clamp(1.0 - 0.5 * dot(c, c), 0.0, 1.0);
+    float g = (10.0 + 130.0 * v * vign + hash12(gl_FragCoord.xy) - 0.5) / 255.0;
+    gl_FragColor = vec4(g, g, g, 1.0);
+}
+)";
+
+class FlowQuad : public CCNode {
+public:
+    CCGLProgram* m_program = nullptr;
+    GLint m_sizeLoc = -1;
+    GLint m_offsetLoc = -1;
+    float m_offset[4] = { 0, 0, 0, 0 };
+
+    static FlowQuad* create(CCGLProgram* program) {
+        auto ret = new FlowQuad();
+        if (ret->init()) {
+            ret->m_program = program;
+            ret->m_sizeLoc = program->getUniformLocationForName("u_size");
+            ret->m_offsetLoc = program->getUniformLocationForName("u_offset");
+            ret->autorelease();
+            return ret;
+        }
+        delete ret;
+        return nullptr;
+    }
+
+    void draw() override {
+        auto size = this->getContentSize();
+        m_program->use();
+        m_program->setUniformsForBuiltins();
+        m_program->setUniformLocationWith2f(m_sizeLoc, size.width, size.height);
+        m_program->setUniformLocationWith4f(m_offsetLoc, m_offset[0], m_offset[1], m_offset[2], m_offset[3]);
+        ccGLBindVAO(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        ccGLEnableVertexAttribs(kCCVertexAttribFlag_Position);
+        GLfloat verts[8] = { 0, 0, size.width, 0, 0, size.height, size.width, size.height };
+        glVertexAttribPointer(kCCVertexAttrib_Position, 2, GL_FLOAT, GL_FALSE, 0, verts);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        CC_INCREMENT_GL_DRAWS(1);
+    }
+};
+
+CCRenderTexture* g_flowTarget = nullptr;
+FlowQuad* g_flowQuad = nullptr;
+bool g_flowFailed = false;
+double g_flowLastDraw = -1.0;
+
+bool flowEnabled() {
+    return setting("flowing-background");
+}
+
+CCGLProgram* flowProgram() {
+    constexpr char const* key = "chaz.minimal-helper/flow";
+    auto cache = CCShaderCache::sharedShaderCache();
+    if (auto program = cache->programForKey(key)) return program;
+    auto program = new CCGLProgram();
+    if (!program->initWithVertexShaderByteArray(FLOW_VERT, FLOW_FRAG)) {
+        log::error("flowing background: shader didn't compile");
+        program->release();
+        return nullptr;
+    }
+    program->addAttribute(kCCAttributeNamePosition, kCCVertexAttrib_Position);
+    if (!program->link()) {
+        log::error("flowing background: shader didn't link");
+        program->release();
+        return nullptr;
+    }
+    program->updateUniforms();
+    cache->addProgram(program, key);
+    program->release();
+    return program;
+}
+
+float g_flowAspect = 0.f;
+
+// The shared texture all backgrounds show, or nullptr if it can't be made.
+CCTexture2D* flowTexture() {
+    // remake it if the window changed shape, so the clouds never look stretched
+    auto winNow = CCDirector::get()->getWinSize();
+    if (g_flowTarget && winNow.height > 0 && std::abs(winNow.width / winNow.height - g_flowAspect) > 0.01f) {
+        g_flowTarget->release();
+        g_flowQuad->release();
+        g_flowTarget = nullptr;
+        g_flowQuad = nullptr;
+    }
+    if (!g_flowTarget) {
+        if (g_flowFailed) return nullptr;
+        auto program = flowProgram();
+        auto win = CCDirector::get()->getWinSize();
+        float csf = CC_CONTENT_SCALE_FACTOR();
+        if (!program || win.width <= 0 || win.height <= 0 || csf <= 0) {
+            g_flowFailed = true;
+            return nullptr;
+        }
+        // 960 px wide, the screen's aspect ratio (sizes here are in points)
+        int w = std::max(1, static_cast<int>(std::lround(960.f / csf)));
+        int h = std::max(1, static_cast<int>(std::lround(960.f * win.height / win.width / csf)));
+        auto target = CCRenderTexture::create(w, h, kCCTexture2DPixelFormat_RGBA8888);
+        auto quad = FlowQuad::create(program);
+        if (!target || !quad) {
+            g_flowFailed = true;
+            return nullptr;
+        }
+        target->retain();
+        quad->retain();
+        target->getSprite()->getTexture()->setAntiAliasTexParameters();
+        quad->setContentSize({ static_cast<float>(w), static_cast<float>(h) });
+        g_flowTarget = target;
+        g_flowQuad = quad;
+        g_flowLastDraw = -1.0;
+        g_flowAspect = win.width / win.height;
+    }
+    return g_flowTarget->getSprite()->getTexture();
+}
+
+// Redraw the clouds for the current time (at most 120 times a second).
+void drawFlow() {
+    if (!flowTexture()) return;
+    if (g_flowLastDraw >= 0.0 && g_clock - g_flowLastDraw < 1.0 / 120.0) return;
+    g_flowLastDraw = g_clock;
+    double speed = std::clamp(Mod::get()->getSettingValue<double>("background-speed"), 0.1, 5.0);
+    // two slow circles with unrelated periods, so the motion never visibly repeats
+    double a = TAU * g_clock * speed / 28.0;
+    double b = TAU * g_clock * speed / 75.6;
+    g_flowQuad->m_offset[0] = static_cast<float>(0.6 * std::cos(a));
+    g_flowQuad->m_offset[1] = static_cast<float>(0.6 * std::sin(a));
+    g_flowQuad->m_offset[2] = static_cast<float>(0.25 * std::cos(b));
+    g_flowQuad->m_offset[3] = static_cast<float>(0.25 * std::sin(b));
+    g_flowTarget->beginWithClear(0, 0, 0, 1);
+    g_flowQuad->visit();
+    g_flowTarget->end();
+}
+
+// Turn a background sprite into a window onto the flowing clouds, filling the screen.
+void showFlow(CCSprite* sprite, CCTexture2D* tex, CCSize const& win) {
+    sprite->stopAllActions();
+    if (sprite->getTexture() != tex) {
+        sprite->setUserObject("flow-host"_spr, CCBool::create(true));
+        sprite->setTexture(tex);
+        auto size = tex->getContentSize();
+        sprite->setTextureRect({ 0, 0, size.width, size.height });
+        sprite->setFlipY(true); // render textures are stored upside down
+    }
+    sprite->setColor({ 255, 255, 255 });
+    sprite->setOpacity(255);
+    auto size = sprite->getContentSize();
+    if (size.width <= 0 || size.height <= 0) return;
+    sprite->setAnchorPoint({ 0.5f, 0.5f });
+    sprite->setScaleX(win.width / size.width * 1.02f);
+    sprite->setScaleY(win.height / size.height * 1.02f);
+    sprite->setPosition(win / 2);
+}
+
 float driftWave() { return static_cast<float>(std::sin(TAU * g_clock / 14.0)); }        // -1 .. 1
 float zoomWave() { return static_cast<float>(0.5 - 0.5 * std::cos(TAU * g_clock / 18.0)); } // 0 .. 1
 
@@ -158,42 +367,59 @@ void driveGradient(CCNode* node, CCSize const& win) {
     node->setPosition({ win.width / 2 + 20.f * d, win.height / 2 + 10.f * d });
 }
 
-void driveStars(CCNode* node) {
+void driveStars(CCNode* node, std::string_view id) {
     auto sprite = typeinfo_cast<CCSprite*>(node);
     if (!sprite) return;
     sprite->stopAllActions();
-    std::string id(node->getID());
     if (endsWith(id, "chaz-stars1")) sprite->setOpacity(starOpacity(2.2, true));
     else sprite->setOpacity(starOpacity(3.2, false));
 }
 
-bool isStars(std::string const& id) {
+bool isStars(std::string_view id) {
     return endsWith(id, "chaz-stars1") || endsWith(id, "chaz-stars2");
 }
 
-void visit(CCNode* node, CCSize const& win, int depth) {
+struct Visit {
+    CCSize win;
+    CCTexture2D* flow = nullptr; // set when the flowing clouds replace the pack's nebula
+    bool foundBackground = false;
+};
+
+void visit(CCNode* node, Visit& v, int depth) {
     if (!node || depth > 4) return;
     auto children = node->getChildren();
-    if (!children) return;
+    // big containers (lists, object layers) never hold the background
+    if (!children || children->count() > 200) return;
     for (auto child : CCArrayExt<CCNode*>(children)) {
-        std::string id(child->getID());
-        if (endsWith(id, "chaz-bg")) {
-            driveNebula(child, win);
-        }
-        else if (isStars(id)) {
-            driveStars(child);
-        }
-        else if (id == "background") {
-            // only the backgrounds the pack animates (they carry its star layers)
-            bool animated = false;
+        std::string_view id = child->getID();
+        bool nebula = endsWith(id, "chaz-bg");
+        bool gradient = false;
+        if (!nebula && id == "background") {
+            // the backgrounds the pack animates carry its star layers; GD's own menu
+            // background sprite (GJ_gradientBG) counts too once clouds are on
             if (auto kids = child->getChildren()) {
                 for (auto k : CCArrayExt<CCNode*>(kids)) {
-                    if (isStars(std::string(k->getID()))) { animated = true; break; }
+                    if (isStars(k->getID())) { gradient = true; break; }
                 }
             }
-            if (animated) driveGradient(child, win);
+            if (!gradient && v.flow) {
+                auto sprite = typeinfo_cast<CCSprite*>(child);
+                gradient = sprite && (sprite->getUserObject("flow-host"_spr) || isSpriteName(sprite, "GJ_gradientBG.png"));
+            }
         }
-        visit(child, win, depth + 1);
+        if (nebula || gradient) {
+            v.foundBackground = true;
+            auto sprite = typeinfo_cast<CCSprite*>(child);
+            if (v.flow && sprite) showFlow(sprite, v.flow, v.win);
+            else if (nebula) driveNebula(child, v.win);
+            else driveGradient(child, v.win);
+        }
+        else if (isStars(id)) {
+            child->stopAllActions();
+            if (v.flow) child->setVisible(false); // just the clouds, no dots
+            else driveStars(child, id);
+        }
+        visit(child, v, depth + 1);
     }
 }
 
@@ -202,16 +428,21 @@ public:
     void tick(float dt) {
         g_clock += std::min(dt, 0.1f);
         if (!setting("continuous-background")) return;
+        // nothing to animate while playing or editing a level
+        if (PlayLayer::get() || LevelEditorLayer::get()) return;
         auto director = CCDirector::get();
         auto scene = director->getRunningScene();
         if (!scene) return;
-        auto win = director->getWinSize();
+        Visit v;
+        v.win = director->getWinSize();
+        v.flow = flowEnabled() ? flowTexture() : nullptr;
         // during a fade both screens are drawn by the transition, not as children
         if (auto transition = typeinfo_cast<CCTransitionScene*>(scene)) {
-            visit(transition->m_pInScene, win, 0);
-            visit(transition->m_pOutScene, win, 0);
+            visit(transition->m_pInScene, v, 0);
+            visit(transition->m_pOutScene, v, 0);
         }
-        visit(scene, win, 0);
+        visit(scene, v, 0);
+        if (v.flow && v.foundBackground) drawFlow();
     }
 };
 
@@ -365,6 +596,16 @@ void roundFill(CCSprite* bar, CCNode* groove) {
 // motion carries straight on into the main menu.
 void addMenuBackground(CCNode* layer) {
     auto win = CCDirector::get()->getWinSize();
+    if (auto flow = flowEnabled() ? flowTexture() : nullptr) {
+        // flowing clouds (the driver keeps it filling the screen and redraws it)
+        auto clouds = CCSprite::createWithTexture(flow);
+        if (clouds) {
+            clouds->setID("loading-chaz-bg"_spr);
+            showFlow(clouds, flow, win);
+            layer->addChild(clouds, -100);
+            return;
+        }
+    }
     auto nebula = CCSprite::create("chaz_menu_bg.png");
     if (!nebula) return; // texture pack not active
     nebula->setID("loading-chaz-bg"_spr);
