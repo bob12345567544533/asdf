@@ -565,11 +565,11 @@ void roundFill(CCSprite* bar, CCNode* groove) {
     float fullWidth = g.size.width - 2 * inset;
     float t = fullWidth > 0.f ? std::clamp(b.size.width / fullWidth, 0.f, 1.f) : 0.f;
     float length = t * (rightMax - leftEdge);
-    float right = leftEdge + length;
+    float fillEnd = leftEdge + length;
     bool show = length > 0.05f;
     float d = std::clamp(length, 0.01f, 2 * r); // cap diameter
     float leftC = leftEdge + d / 2;
-    float rightC = std::max(leftC, right - d / 2);
+    float rightC = std::max(leftC, fillEnd - d / 2);
 
     bar->setCascadeOpacityEnabled(false);
     bar->setOpacity(0);
