@@ -3,11 +3,11 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v1.2.3",
+	"version": "v2.0.0",
 	"id": "ai.predictivebuffer",
 	"name": "Predictive Input Buffer",
 	"developer": "lilWC",
-	"description": "Trajectory-based 1-2 frame press and wave release input buffer.",
+	"description": "Holds back a click that would kill you by a few ticks (as few as possible) and fires it when it is safe. Press and release, every mode.",
 	"settings": {
 		"enabled": {
 			"type": "bool",
@@ -17,21 +17,9 @@
 		"buffer-ticks": {
 			"type": "int",
 			"name": "Max Ticks",
-			"description": "Largest delay the buffer may add, in 240 TPS ticks (1 tick = 4.17 ms). Wave is capped at 8. F6 also sets this (2 / 4 / 8 / 16).",
+			"description": "Largest delay the buffer may add, in 240 TPS ticks (1 tick = 4.17 ms). Wave stops at 8. The toggle key cycles 2 / 4 / 8 / 16 / off.",
 			"default": 2,
 			"min": 0,
-			"max": 24,
-			"control": {
-				"arrow-step": 1,
-				"slider-step": 1
-			}
-		},
-		"buffer-min-ticks": {
-			"type": "int",
-			"name": "Min Ticks",
-			"description": "Smallest delay the buffer will use. With Min 1 and Max 4 it only delays by 1 to 4 ticks. If Min is above Max, Max is used.",
-			"default": 1,
-			"min": 1,
 			"max": 24,
 			"control": {
 				"arrow-step": 1,
@@ -41,7 +29,7 @@
 		"randomize": {
 			"type": "int",
 			"name": "Randomize (ticks)",
-			"description": "0 = always the smallest safe delay (like the original). Above 0 = the search starts at a random delay up to this many ticks above Min, and takes the first safe one from there.",
+			"description": "0 = always the smallest safe delay. Above 0 = any safe delay up to this many ticks above the smallest one, picked at random.",
 			"default": 3,
 			"min": 0,
 			"max": 24,
@@ -53,13 +41,31 @@
 		"buffer-releases": {
 			"type": "bool",
 			"name": "Releases",
-			"description": "Also buffer early releases for wave and robot (and ship, if Ship is on).",
+			"description": "Also holds back early releases in wave and robot (and ship, if Ship is on).",
 			"default": true
 		},
 		"buffer-ship": {
 			"type": "bool",
 			"name": "Ship",
-			"default": false
+			"default": false,
+			"description": "Lets the buffer work in ship mode. Off by default: ship predictions are less reliable."
+		},
+		"show-feedback": {
+			"type": "bool",
+			"name": "Timing Popup",
+			"default": true,
+			"description": "Shows in game how early each held-back click was."
+		},
+		"keys-title": {
+			"type": "title",
+			"name": "Keys and window"
+		},
+		"toggle-key": {
+			"type": "keybind",
+			"name": "Toggle Key",
+			"description": "Cycles the buffer 2 -> 4 -> 8 -> 16 ticks -> off.",
+			"default": "F6",
+			"category": "universal"
 		},
 		"menu-key": {
 			"type": "keybind",
@@ -84,29 +90,10 @@
 				"slider-step": 5
 			}
 		},
-		"theme": {
-			"type": "string",
-			"name": "Window Theme",
-			"description": "Look of the F7 window.",
-			"default": "Minimal",
-			"one-of": [
-				"Minimal"
-			]
-		},
-		"show-feedback": {
-			"type": "bool",
-			"name": "Timing Popup",
-			"default": true
-		},
-		"improvements-title": {
+		"checks-title": {
 			"type": "title",
-			"name": "Improvements",
-			"description": "Each one can be switched off on its own. Classic turns them all off (exactly the previous version)."
-		},
-		"classic": {
-			"type": "bool",
-			"name": "Classic (all improvements off)",
-			"default": false
+			"name": "Checks",
+			"description": "How the hidden ghost judges a delay. All on is best; each can be switched off on its own."
 		},
 		"fresh-ghost": {
 			"type": "bool",
