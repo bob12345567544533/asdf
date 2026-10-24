@@ -509,13 +509,13 @@ void paintSliders(gp::Graphics& g) {
         }
         else if (i == 0) {
             auto big = std::to_wstring(v);
-            auto small = fmtw(L" tick%ls  ·  %.1f ms", plural(v), v * 1000.0 / 240.0);
-            runs(g, { { big, Face::Light, 20.f, col(C_TEXT) }, { small, Face::Ui, 12.f, col(C_MUTED) } }, head, RIGHT);
+            auto unit = fmtw(L" tick%ls  ·  %.1f ms", plural(v), v * 1000.0 / 240.0);
+            runs(g, { { big, Face::Light, 20.f, col(C_TEXT) }, { unit, Face::Ui, 12.f, col(C_MUTED) } }, head, RIGHT);
         }
         else {
             auto big = fmtw(L"+%d", v);
-            auto small = fmtw(L" tick%ls", plural(v));
-            runs(g, { { big, Face::Light, 20.f, col(C_TEXT) }, { small, Face::Ui, 12.f, col(C_MUTED) } }, head, RIGHT);
+            auto unit = fmtw(L" tick%ls", plural(v));
+            runs(g, { { big, Face::Light, 20.f, col(C_TEXT) }, { unit, Face::Ui, 12.f, col(C_MUTED) } }, head, RIGHT);
         }
 
         float y = trackY(i);
