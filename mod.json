@@ -76,7 +76,8 @@
 		"open-window": {
 			"type": "bool",
 			"name": "Open Window On Launch",
-			"default": true
+			"default": false,
+			"description": "Opens the window when the game starts. Off: it only opens with the toggle key."
 		},
 		"window-size": {
 			"type": "int",
