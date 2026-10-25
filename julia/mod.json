@@ -3,7 +3,7 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v1.1.0",
+	"version": "v1.2.0",
 	"id": "chaz.made-for-julia",
 	"name": "Made for Julia",
 	"developer": "chaz",
@@ -32,6 +32,18 @@
 			"type": "bool",
 			"name": "Pink Geode mods screen",
 			"description": "Gives Geode's mods screen her pinks and the moving background.",
+			"default": true
+		},
+		"round-fill": {
+			"type": "bool",
+			"name": "Rounded slider fill",
+			"description": "The volume sliders and loading bar fill up as a smooth pink pill instead of a square-ended strip.",
+			"default": true
+		},
+		"clean-saved": {
+			"type": "bool",
+			"name": "Clean saved levels",
+			"description": "Saved and favorite levels only keep the back button, the heart and the page arrows.",
 			"default": true
 		},
 		"speed": {

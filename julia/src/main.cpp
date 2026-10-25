@@ -6,12 +6,14 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/LoadingLayer.hpp>
 #include <Geode/modify/MenuLayer.hpp>
+#include <Geode/modify/Slider.hpp>
 #include <Geode/utils/ColorProvider.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <string>
 #include <string_view>
+#include <vector>
 
 using namespace geode::prelude;
 
@@ -107,14 +109,16 @@ vec4 floaters(vec2 uv, float scale, float speed, float seed, float alpha) {
     float ang = 0.35 * sin(u_time * 0.6 + h3 * 30.0);
     p = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * p;
     float aa = 1.6 * scale / (u_res.y * size);
-    vec3 col = vec3(1.0);
+    // white, her blue (#D4FFFF) or her purple (#D4D4FF)
+    float pick = hash12(cell + seed + 21.7);
+    vec3 col = pick < 0.4 ? vec3(1.0) : (pick < 0.7 ? vec3(0.831, 1.0, 1.0) : vec3(0.831, 0.831, 1.0));
     float d;
     if (h3 < 0.5) {
         d = sdHeart(p);
     } else {
         d = sdFlower(p);
         float centre = smoothstep(aa, -aa, length(p) - 0.14);
-        col = mix(vec3(1.0), vec3(1.0, 0.76, 0.86), centre);
+        col = mix(col, vec3(1.0, 0.71, 0.86), centre);
     }
     float cover = smoothstep(aa, -aa, d) * alpha;
     return vec4(col, cover);
@@ -123,11 +127,13 @@ vec4 floaters(vec2 uv, float scale, float speed, float seed, float alpha) {
 void main() {
     vec2 uv = v_pos / u_size.y;               // height = 1
     float t = v_pos.y / u_size.y;              // 0 bottom .. 1 top
-    vec3 top = vec3(1.0, 0.839, 0.910);
-    vec3 bottom = vec3(0.965, 0.627, 0.769);
-    vec3 col = mix(bottom, top, t);
+    // her pink (#FFD4EA) in the middle, lighter at the top, towards her purple at the bottom
+    vec3 top = vec3(1.0, 0.902, 0.953);
+    vec3 mid = vec3(1.0, 0.831, 0.918);
+    vec3 bottom = vec3(0.894, 0.847, 1.0);
+    vec3 col = t < 0.45 ? mix(bottom, mid, t / 0.45) : mix(mid, top, (t - 0.45) / 0.55);
     vec2 c = v_pos / u_size - 0.5;
-    col = mix(col, vec3(1.0, 0.94, 0.968), 0.28 * clamp(1.0 - 2.2 * dot(c, c), 0.0, 1.0));
+    col = mix(col, vec3(1.0, 0.957, 0.98), 0.28 * clamp(1.0 - 2.2 * dot(c, c), 0.0, 1.0));
 
     // soft flowing clouds
     vec2 p = mat2(0.8, 0.6, -0.6, 0.8) * (uv * 1.8) + vec2(30.0, 30.0);
@@ -135,14 +141,14 @@ void main() {
     vec2 qd = vec2(fbm(p + o), fbm(p + vec2(5.2, 1.3) + vec2(-o.y, o.x)));
     float cl = fbm(p + 2.6 * qd + u_offset.zw);
     cl = smoothstep(0.45, 0.85, cl);
-    col = mix(col, vec3(1.0, 0.96, 0.98), cl * 0.38);
+    col = mix(col, vec3(0.95, 1.0, 1.0), cl * 0.4); // clouds with a touch of her blue
 
     // hearts and flowers, far to near
-    vec4 l1 = floaters(uv, 7.0, 0.020, 3.0, 0.30);
+    vec4 l1 = floaters(uv, 7.0, 0.020, 3.0, 0.35);
     col = mix(col, l1.rgb, l1.a);
-    vec4 l2 = floaters(uv, 4.6, 0.032, 11.0, 0.42);
+    vec4 l2 = floaters(uv, 4.6, 0.032, 11.0, 0.50);
     col = mix(col, l2.rgb, l2.a);
-    vec4 l3 = floaters(uv, 3.0, 0.046, 29.0, 0.55);
+    vec4 l3 = floaters(uv, 3.0, 0.046, 29.0, 0.65);
     col = mix(col, l3.rgb, l3.a);
 
     col += (hash12(gl_FragCoord.xy) - 0.5) / 255.0;
@@ -366,6 +372,135 @@ void startDriver() {
     CCDirector::get()->getScheduler()->scheduleSelector(schedule_selector(Driver::tick), driver, 0.f, false);
 }
 
+// ---------------------------------------------------------------------------
+// Rounded slider fill (volume sliders, loading bar)
+// ---------------------------------------------------------------------------
+
+// A node's bounding rect expressed in another node's coordinate space.
+CCRect rectIn(CCNode* space, CCNode* node) {
+    auto size = node->getContentSize();
+    if (node == space) return { 0, 0, size.width, size.height };
+    auto a = space->convertToNodeSpace(node->convertToWorldSpace({ 0, 0 }));
+    auto b = space->convertToNodeSpace(node->convertToWorldSpace({ size.width, size.height }));
+    return { std::min(a.x, b.x), std::min(a.y, b.y), std::abs(b.x - a.x), std::abs(b.y - a.y) };
+}
+
+// Smooth white dot drawn in code, kept in GD's texture cache (rebuilt if GD clears it).
+CCTexture2D* dotTexture() {
+    constexpr char const* key = "chaz.made-for-julia/dot";
+    auto cache = CCTextureCache::sharedTextureCache();
+    if (auto tex = cache->textureForKey(key)) return tex;
+    constexpr int n = 32;
+    std::vector<unsigned char> px(n * n * 4);
+    for (int y = 0; y < n; y++) {
+        for (int x = 0; x < n; x++) {
+            float r = n / 2.f - 1.f;
+            float d = std::hypot(x + 0.5f - n / 2.f, y + 0.5f - n / 2.f);
+            float a = std::clamp((r - d) / 1.2f + 0.5f, 0.f, 1.f);
+            auto p = &px[(y * n + x) * 4];
+            p[0] = p[1] = p[2] = 255;
+            p[3] = static_cast<unsigned char>(std::lround(a * 255.f));
+        }
+    }
+    auto image = new CCImage();
+    if (!image->initWithImageData(px.data(), static_cast<int>(px.size()), CCImage::kFmtRawData, n, n, 8)) {
+        image->release();
+        return nullptr;
+    }
+    auto tex = cache->addUIImage(image, key);
+    image->release();
+    return tex;
+}
+
+// GD draws the fill as a tiled strip with square ends inside the round groove, which looks
+// broken at low values. The strip is made invisible and a blue pill is drawn in its place:
+// the left end sits in the groove's left curve with an even gap all around, the right end
+// follows the strip, and below its own height it shrinks into a smaller and smaller dot so
+// tiny values stay visible. The pill lives inside the strip, so it hides when GD hides it.
+void roundFill(CCSprite* bar, CCNode* groove) {
+    if (!bar || !groove || !bar->getParent()) return;
+    auto tex = dotTexture();
+    if (!tex) return;
+    auto parent = bar->getParent();
+
+    auto g = rectIn(parent, groove);
+    float h = g.size.height;
+    if (h <= 0.f || bar->getScaleX() == 0.f || bar->getScaleY() == 0.f) return;
+    float r = h * 0.22f;                         // fill is 44% of the groove height
+    float cy = g.getMidY();
+    float leftEdge = g.getMinX() + h / 2 - r;
+    float rightMax = g.getMaxX() - h / 2 + r;
+    auto b = bar->boundingBox();
+    float inset = std::max(0.f, b.getMinX() - g.getMinX());
+    float fullWidth = g.size.width - 2 * inset;
+    float t = fullWidth > 0.f ? std::clamp(b.size.width / fullWidth, 0.f, 1.f) : 0.f;
+    float length = t * (rightMax - leftEdge);
+    float fillEnd = leftEdge + length;
+    bool shown = length > 0.05f;
+    float d = std::clamp(length, 0.01f, 2 * r);
+    float leftC = leftEdge + d / 2;
+    float rightC = std::max(leftC, fillEnd - d / 2);
+
+    bar->setCascadeOpacityEnabled(false);
+    bar->setOpacity(0);
+
+    auto texSize = tex->getContentSize();
+    float onePx = 1.f / CC_CONTENT_SCALE_FACTOR();
+    auto c = bar->getColor();
+    auto tint = [&](GLubyte r, GLubyte g, GLubyte bl) {
+        return ccColor3B{ static_cast<GLubyte>(c.r * r / 255), static_cast<GLubyte>(c.g * g / 255),
+                          static_cast<GLubyte>(c.b * bl / 255) };
+    };
+    auto local = [&](float x, float y) {
+        return bar->convertToNodeSpace(parent->convertToWorldSpace({ x, y }));
+    };
+    float sx = 1.f / bar->getScaleX(), sy = 1.f / bar->getScaleY();
+    float span = rightC - leftC;
+
+    // one rounded pill (two dot caps + a stretched middle) of diameter `dia`
+    auto pill = [&](char const* leftID, char const* rightID, char const* midID, float dia, ccColor3B color, int z) {
+        auto part = [&](char const* id, bool middle) -> CCSprite* {
+            auto sprite = static_cast<CCSprite*>(bar->getChildByID(id));
+            if (!sprite) {
+                sprite = middle
+                    ? CCSprite::createWithTexture(tex, { texSize.width / 2 - onePx, 0, 2 * onePx, texSize.height })
+                    : CCSprite::createWithTexture(tex);
+                if (!sprite) return nullptr;
+                sprite->setID(id);
+                bar->addChild(sprite, z);
+            }
+            else if (sprite->getTexture() != tex) {
+                sprite->setTexture(tex);
+                if (middle) sprite->setTextureRect({ texSize.width / 2 - onePx, 0, 2 * onePx, texSize.height });
+                else sprite->setTextureRect({ 0, 0, texSize.width, texSize.height });
+            }
+            sprite->setColor(color);
+            sprite->setOpacity(255);
+            return sprite;
+        };
+        auto left = part(leftID, false);
+        auto right = part(rightID, false);
+        auto mid = part(midID, true);
+        if (!left || !right || !mid) return;
+        for (auto cap : { left, right }) {
+            cap->setScaleX(dia / texSize.width * sx);
+            cap->setScaleY(dia / texSize.height * sy);
+        }
+        left->setVisible(shown);
+        right->setVisible(shown && span > 0.01f);
+        left->setPosition(local(leftC, cy));
+        right->setPosition(local(rightC, cy));
+        mid->setVisible(shown && span > 0.01f);
+        mid->setPosition(local((leftC + rightC) / 2, cy));
+        mid->setScaleX(std::max(span, 0.01f) / (2 * onePx) * sx);
+        mid->setScaleY(dia / texSize.height * sy);
+    };
+    // her blue (#D4FFFF) with a thin deep pink edge, so it shows on her light pink popups too
+    float edge = std::max(onePx, r * 0.3f);
+    pill("fill-edge-left"_spr, "fill-edge-right"_spr, "fill-edge-middle"_spr, d + 2 * edge, tint(216, 74, 140), 1);
+    pill("fill-left"_spr, "fill-right"_spr, "fill-middle"_spr, d, tint(212, 255, 255), 2);
+}
+
 // A full-screen host sprite (main menu, loading screen, Geode's mods screen).
 CCSprite* makeHost(char const* id) {
     auto tex = texture();
@@ -387,21 +522,21 @@ void addHost(CCNode* layer, char const* id, int z) {
 void pinkGeode() {
     struct Pink { char const* id; ccColor4B color; };
     static Pink const colors[] = {
-        { "mod-list-bg", { 255, 214, 230, 255 } },
-        { "mod-list-search-bg", { 255, 190, 216, 255 } },
-        { "mod-list-tab-deselected-bg", { 255, 255, 255, 255 } },   // the tab art as drawn
-        { "mod-list-tab-selected-bg", { 255, 168, 204, 255 } },
-        { "mod-list-tab-selected-bg-alt", { 255, 168, 204, 255 } },
-        { "mod-list-version-label", { 255, 120, 172, 255 } },
-        { "mod-list-featured-color", { 255, 150, 196, 255 } },
-        { "keybinds-list-category-label", { 226, 84, 141, 255 } },
+        { "mod-list-bg", { 255, 212, 234, 255 } },                 // her pink
+        { "mod-list-search-bg", { 255, 202, 229, 255 } },
+        { "mod-list-tab-deselected-bg", { 255, 255, 255, 255 } },  // the tab art as drawn
+        { "mod-list-tab-selected-bg", { 212, 212, 255, 255 } },    // her purple
+        { "mod-list-tab-selected-bg-alt", { 212, 212, 255, 255 } },
+        { "mod-list-version-label", { 150, 150, 240, 255 } },
+        { "mod-list-featured-color", { 212, 212, 255, 255 } },
+        { "keybinds-list-category-label", { 216, 74, 140, 255 } },
         { "mods-layer-gd-bg", { 255, 255, 255, 255 } },
-        { "swelvy-bg-0", { 255, 222, 236, 255 } },
-        { "swelvy-bg-1", { 255, 206, 226, 255 } },
-        { "swelvy-bg-2", { 252, 190, 216, 255 } },
-        { "swelvy-bg-3", { 248, 174, 206, 255 } },
-        { "swelvy-bg-4", { 244, 158, 196, 255 } },
-        { "swelvy-bg-5", { 238, 142, 186, 255 } },
+        { "swelvy-bg-0", { 255, 230, 243, 255 } },
+        { "swelvy-bg-1", { 255, 212, 234, 255 } },
+        { "swelvy-bg-2", { 212, 255, 255, 255 } },
+        { "swelvy-bg-3", { 255, 212, 234, 255 } },
+        { "swelvy-bg-4", { 212, 212, 255, 255 } },
+        { "swelvy-bg-5", { 228, 216, 255, 255 } },
     };
     for (auto const& c : colors) {
         ColorProvider::get()->override(std::string("geode.loader/") + c.id, c.color);
@@ -445,7 +580,92 @@ class $modify(JuliaLoadingLayer, LoadingLayer) {
             addHost(this, "loading-julia-bg"_spr, -100);
             startDriver();
         }
+        if (setting("round-fill")) {
+            this->schedule(schedule_selector(JuliaLoadingLayer::juliaLoadingTick));
+        }
         return true;
+    }
+
+    void juliaLoadingTick(float) {
+        if (!m_sliderBar) return;
+        CCNode* groove = m_sliderBar->getParent();
+        if (!groove || groove == this) groove = this->getChildByID("progress-slider");
+        roundFill(m_sliderBar, groove);
+    }
+};
+
+// Saved and favorite levels: only the back button, the heart and the page arrows (which GD
+// only shows when there's more than one page). The info button's corner goes to the heart.
+bool isSavedList(GJSearchObject* search) {
+    return search && (search->m_searchType == SearchType::SavedLevels || search->m_searchType == SearchType::FavouriteLevels);
+}
+
+void hideNode(CCNode* node) {
+    if (!node) return;
+    node->setVisible(false);
+    if (auto item = typeinfo_cast<CCMenuItem*>(node)) item->setEnabled(false);
+}
+
+// the select boxes on each level (they only work with the delete buttons, which are gone)
+void hideSelectBoxes(CCNode* node, int depth) {
+    if (!node || depth > 10 || !node->getChildren()) return;
+    for (auto child : CCArrayExt<CCNode*>(node->getChildren())) {
+        if (child->getID() == "select-toggler") hideNode(child);
+        else hideSelectBoxes(child, depth + 1);
+    }
+}
+
+class $modify(JuliaLevelBrowserLayer, LevelBrowserLayer) {
+    bool init(GJSearchObject* search) {
+        if (!LevelBrowserLayer::init(search)) return false;
+        this->juliaTidy();
+        return true;
+    }
+
+    void setupLevelBrowser(CCArray* items) {
+        LevelBrowserLayer::setupLevelBrowser(items);
+        this->juliaTidy(); // GD shows some buttons again on every page
+    }
+
+    void juliaTidy() {
+        if (!setting("clean-saved") || !isSavedList(m_searchObject)) return;
+        constexpr std::string_view keep[] = { "back-button", "favorite-button", "prev-page-button", "next-page-button" };
+        CCPoint infoSpot;
+        bool haveInfo = false;
+        for (auto child : CCArrayExt<CCNode*>(this->getChildren())) {
+            std::string_view childID = child->getID();
+            if (auto menu = typeinfo_cast<CCMenu*>(child)) {
+                if (!menu->getChildren()) continue;
+                for (auto item : CCArrayExt<CCNode*>(menu->getChildren())) {
+                    std::string_view id = item->getID();
+                    if (std::find(std::begin(keep), std::end(keep), id) != std::end(keep)) continue;
+                    auto button = typeinfo_cast<CCMenuItemSpriteExtra*>(item);
+                    if (button && button->isVisible() && button->getNormalImage()) {
+                        auto image = button->getNormalImage();
+                        if (isSpriteFrameName(image, "GJ_infoIcon_001.png") || isSpriteFrameName(image, "GJ_infoBtn_001.png")) {
+                            infoSpot = menu->convertToWorldSpace(button->getPosition());
+                            haveInfo = true;
+                        }
+                    }
+                    hideNode(item);
+                }
+            }
+            else if (childID == "level-count-label" || childID == "select-all-text") {
+                hideNode(child);
+            }
+        }
+        if (haveInfo) {
+            auto heart = this->getChildByIDRecursive("favorite-button");
+            if (heart && heart->getParent()) heart->setPosition(heart->getParent()->convertToNodeSpace(infoSpot));
+        }
+        hideSelectBoxes(this, 0);
+    }
+};
+
+class $modify(JuliaSlider, Slider) {
+    void updateBar() {
+        Slider::updateBar();
+        if (setting("round-fill")) roundFill(m_sliderBar, m_groove);
     }
 };
 
