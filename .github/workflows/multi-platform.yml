@@ -9,6 +9,8 @@ on:
     paths-ignore:
       - 'minimal/**'
       - 'solidtrail/**'
+      - 'julia/**'
+      - '.github/workflows/julia.yml'
       - '.github/workflows/solidtrail.yml'
       - 'texturepack/**'
       - '.github/workflows/minimal.yml'

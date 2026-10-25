@@ -1,0 +1,47 @@
+{
+	"geode": "5.11.2",
+	"gd": {
+		"win": "2.2081"
+	},
+	"version": "v1.0.0",
+	"id": "chaz.made-for-julia",
+	"name": "Made for Julia",
+	"developer": "chaz",
+	"description": "The cute moving background for Julia's pink texture pack: soft pink clouds with little hearts and flowers floating up, on every menu and the loading screen.",
+	"early-load": true,
+	"settings": {
+		"enabled": {
+			"type": "bool",
+			"name": "Moving background",
+			"description": "Soft pink clouds with little hearts and flowers floating up, behind every menu.",
+			"default": true
+		},
+		"main-menu": {
+			"type": "bool",
+			"name": "On the main menu too",
+			"description": "Uses it on the main menu instead of the running icons.",
+			"default": true
+		},
+		"loading-screen": {
+			"type": "bool",
+			"name": "On the loading screen",
+			"description": "Uses it on the game's loading screen instead of the blue squares (next time the game starts).",
+			"default": true
+		},
+		"speed": {
+			"type": "float",
+			"name": "Speed",
+			"description": "How fast everything floats. 1 = default.",
+			"default": 1.0,
+			"min": 0.25,
+			"max": 3.0,
+			"control": {
+				"slider": true,
+				"arrows": true,
+				"big-arrows": false,
+				"slider-step": 0.05,
+				"input": true
+			}
+		}
+	}
+}
