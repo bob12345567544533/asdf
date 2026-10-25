@@ -120,7 +120,11 @@ vec4 floaters(vec2 uv, float scale, float speed, float seed, float alpha) {
     // white, her blue (#D4FFFF) or her accent (#D4D4FF purple, or black)
     float pick = hash12(cell + seed + 21.7);
     vec3 col = pick < 0.4 ? vec3(1.0) : (pick < 0.7 ? vec3(0.831, 1.0, 1.0) : u_accent.rgb);
-    if (pick >= 0.7) alpha *= u_accent.a;
+    if (pick >= 0.7) {
+        float a2 = alpha * u_accent.a;
+        if (u_accent.a > 1.0 && a2 < 0.85) col = vec3(1.0); // black version: only the near ones black (faded black looks gray)
+        else alpha = min(a2, 0.95);
+    }
     float d;
     if (h3 < 0.5) {
         d = sdHeart(p);
@@ -204,7 +208,7 @@ public:
         m_program->setUniformLocationWith4f(m_offsetLoc, m_offset[0], m_offset[1], m_offset[2], m_offset[3]);
         m_program->setUniformLocationWith1f(m_timeLoc, m_time);
         if (blackAccent()) {
-            m_program->setUniformLocationWith4f(m_accentLoc, 0.f, 0.f, 0.f, 0.45f);  // black hearts, softer
+            m_program->setUniformLocationWith4f(m_accentLoc, 0.f, 0.f, 0.f, 1.45f);  // black hearts, clearly black up close
             m_program->setUniformLocationWith3f(m_bottomLoc, 1.f, 0.78f, 0.89f);     // a deeper pink
         } else {
             m_program->setUniformLocationWith4f(m_accentLoc, 0.831f, 0.831f, 1.f, 1.f);
