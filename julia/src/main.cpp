@@ -4,6 +4,7 @@
 // every screen, so it keeps floating smoothly when she switches menus.
 
 #include <Geode/Geode.hpp>
+#include <Geode/modify/LevelBrowserLayer.hpp>
 #include <Geode/modify/LoadingLayer.hpp>
 #include <Geode/modify/MenuLayer.hpp>
 #include <Geode/modify/Slider.hpp>
