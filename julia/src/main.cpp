@@ -679,18 +679,41 @@ void hideSelectBoxes(CCNode* node, int depth) {
 class $modify(JuliaLevelBrowserLayer, LevelBrowserLayer) {
     bool init(GJSearchObject* search) {
         if (!LevelBrowserLayer::init(search)) return false;
-        this->juliaTidy();
+        this->juliaTidySoon();
         return true;
     }
 
     void setupLevelBrowser(CCArray* items) {
         LevelBrowserLayer::setupLevelBrowser(items);
-        this->juliaTidy(); // GD shows some buttons again on every page
+        this->juliaTidySoon(); // GD shows some buttons again on every page
+    }
+
+    // a frame later: the buttons only get their names (IDs) once the screen is fully set up
+    void juliaTidySoon() {
+        this->scheduleOnce(schedule_selector(JuliaLevelBrowserLayer::juliaTidyTick), 0.f);
+    }
+
+    void juliaTidyTick(float) {
+        this->juliaTidy();
+    }
+
+    static bool isKept(CCNode* item) {
+        constexpr std::string_view keep[] = { "back-button", "favorite-button", "prev-page-button", "next-page-button" };
+        std::string_view id = item->getID();
+        if (std::find(std::begin(keep), std::end(keep), id) != std::end(keep)) return true;
+        // and by their pictures, in case a name is missing: back arrow, page arrows, heart
+        auto button = typeinfo_cast<CCMenuItemSpriteExtra*>(item);
+        auto image = button ? button->getNormalImage() : nullptr;
+        if (!image) return false;
+        for (auto frame : { "GJ_arrow_01_001.png", "GJ_arrow_02_001.png", "GJ_arrow_03_001.png", "gj_heartOn_001.png",
+                            "gj_heartOff_001.png", "GJ_heartOn_001.png", "GJ_heartOff_001.png" }) {
+            if (isSpriteFrameName(image, frame)) return true;
+        }
+        return false;
     }
 
     void juliaTidy() {
         if (!setting("clean-saved") || !isSavedList(m_searchObject)) return;
-        constexpr std::string_view keep[] = { "back-button", "favorite-button", "prev-page-button", "next-page-button" };
         CCPoint infoSpot;
         bool haveInfo = false;
         for (auto child : CCArrayExt<CCNode*>(this->getChildren())) {
@@ -698,8 +721,7 @@ class $modify(JuliaLevelBrowserLayer, LevelBrowserLayer) {
             if (auto menu = typeinfo_cast<CCMenu*>(child)) {
                 if (!menu->getChildren()) continue;
                 for (auto item : CCArrayExt<CCNode*>(menu->getChildren())) {
-                    std::string_view id = item->getID();
-                    if (std::find(std::begin(keep), std::end(keep), id) != std::end(keep)) continue;
+                    if (isKept(item)) continue;
                     auto button = typeinfo_cast<CCMenuItemSpriteExtra*>(item);
                     if (button && button->isVisible() && button->getNormalImage()) {
                         auto image = button->getNormalImage();
@@ -775,7 +797,7 @@ class $modify(JuliaOptionsLayer, OptionsLayer) {
         OptionsLayer::customSetup();
         if (!setting("tidy-menus") || !m_mainLayer) return;
         // panel
-        if (auto list = m_mainLayer->getChildByID("background")) {
+        if (auto list = static_cast<CCNode*>(m_listLayer)) {
             auto box = list->boundingBox();
             if (auto panel = CCScale9Sprite::create("GJ_square01.png")) {
                 panel->setContentSize(box.size);
@@ -786,8 +808,13 @@ class $modify(JuliaOptionsLayer, OptionsLayer) {
             }
         }
         if (!m_optionsMenu) return;
-        // Rate -> Textures (only when Texture Workshop is installed)
-        auto rate = typeinfo_cast<CCMenuItemSpriteExtra*>(m_optionsMenu->getChildByID("rate-button"));
+        // Rate -> Textures (only when Texture Workshop is installed); found by its text
+        CCMenuItemSpriteExtra* rate = nullptr;
+        for (auto item : CCArrayExt<CCNode*>(m_optionsMenu->getChildren())) {
+            auto button = typeinfo_cast<CCMenuItemSpriteExtra*>(item);
+            auto sprite = button ? typeinfo_cast<ButtonSprite*>(button->getNormalImage()) : nullptr;
+            if (sprite && sprite->m_label && std::string_view(sprite->m_label->getString()) == "Rate") rate = button;
+        }
         if (rate && workshopButton()) {
             rate->setTarget(this, menu_selector(JuliaOptionsLayer::onJuliaTextures));
             if (auto sprite = typeinfo_cast<ButtonSprite*>(rate->getNormalImage())) sprite->setString("Textures");
@@ -823,11 +850,13 @@ class $modify(JuliaLevelPage, LevelPage) {
             m_levelDisplay->setColor({ 255, 230, 243 });
             m_levelDisplay->setOpacity(225);
         }
-        for (auto id : { "normal-progress-bar", "practice-progress-bar" }) {
-            if (auto bar = typeinfo_cast<CCSprite*>(this->getChildByID(id))) {
-                bar->setColor({ 255, 255, 255 });
-                bar->setOpacity(255);
-            }
+        for (auto bar : { m_normalProgressBar, m_practiceProgressBar }) {
+            if (!bar) continue;
+            // the bar's background is either this sprite or the one it sits in
+            auto background = bar->getParent() == this ? bar : typeinfo_cast<CCSprite*>(bar->getParent());
+            if (!background) continue;
+            background->setColor({ 255, 255, 255 });
+            background->setOpacity(255);
         }
     }
 };
