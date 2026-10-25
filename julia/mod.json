@@ -3,11 +3,11 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v1.0.0",
+	"version": "v1.1.0",
 	"id": "chaz.made-for-julia",
 	"name": "Made for Julia",
 	"developer": "chaz",
-	"description": "The cute moving background for Julia's pink texture pack: soft pink clouds with little hearts and flowers floating up, on every menu and the loading screen.",
+	"description": "The cute moving background for Julia's pink texture pack: soft pink clouds with little hearts and flowers floating up, on every menu, the loading screen and Geode's mods screen.",
 	"early-load": true,
 	"settings": {
 		"enabled": {
@@ -26,6 +26,12 @@
 			"type": "bool",
 			"name": "On the loading screen",
 			"description": "Uses it on the game's loading screen instead of the blue squares (next time the game starts).",
+			"default": true
+		},
+		"geode-menu": {
+			"type": "bool",
+			"name": "Pink Geode mods screen",
+			"description": "Gives Geode's mods screen her pinks and the moving background.",
 			"default": true
 		},
 		"speed": {

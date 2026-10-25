@@ -6,6 +6,7 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/LoadingLayer.hpp>
 #include <Geode/modify/MenuLayer.hpp>
+#include <Geode/utils/ColorProvider.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -365,21 +366,69 @@ void startDriver() {
     CCDirector::get()->getScheduler()->scheduleSelector(schedule_selector(Driver::tick), driver, 0.f, false);
 }
 
-// A full-screen host sprite (main menu, loading screen).
-void addHost(CCNode* layer, char const* id, int z) {
+// A full-screen host sprite (main menu, loading screen, Geode's mods screen).
+CCSprite* makeHost(char const* id) {
     auto tex = texture();
-    if (!tex) return;
+    if (!tex) return nullptr;
     auto sprite = CCSprite::createWithTexture(tex);
-    if (!sprite) return;
+    if (!sprite) return nullptr;
     sprite->setID(id);
     show(sprite, tex, CCDirector::get()->getWinSize());
-    layer->addChild(sprite, z);
+    return sprite;
+}
+
+void addHost(CCNode* layer, char const* id, int z) {
+    if (auto sprite = makeHost(id)) layer->addChild(sprite, z);
+}
+
+// Geode's mods screen in her pinks. Geode keeps these colors in its ColorProvider, which is
+// made for exactly this. Geode puts its own back when the theme setting changes, so this runs
+// again every time the mods screen opens.
+void pinkGeode() {
+    struct Pink { char const* id; ccColor4B color; };
+    static Pink const colors[] = {
+        { "mod-list-bg", { 255, 214, 230, 255 } },
+        { "mod-list-search-bg", { 255, 190, 216, 255 } },
+        { "mod-list-tab-deselected-bg", { 255, 255, 255, 255 } },   // the tab art as drawn
+        { "mod-list-tab-selected-bg", { 255, 168, 204, 255 } },
+        { "mod-list-tab-selected-bg-alt", { 255, 168, 204, 255 } },
+        { "mod-list-version-label", { 255, 120, 172, 255 } },
+        { "mod-list-featured-color", { 255, 150, 196, 255 } },
+        { "keybinds-list-category-label", { 226, 84, 141, 255 } },
+        { "mods-layer-gd-bg", { 255, 255, 255, 255 } },
+        { "swelvy-bg-0", { 255, 222, 236, 255 } },
+        { "swelvy-bg-1", { 255, 206, 226, 255 } },
+        { "swelvy-bg-2", { 252, 190, 216, 255 } },
+        { "swelvy-bg-3", { 248, 174, 206, 255 } },
+        { "swelvy-bg-4", { 244, 158, 196, 255 } },
+        { "swelvy-bg-5", { 238, 142, 186, 255 } },
+    };
+    for (auto const& c : colors) {
+        ColorProvider::get()->override(std::string("geode.loader/") + c.id, c.color);
+    }
 }
 
 } // namespace
 
 $on_game(Loaded) {
     startDriver();
+}
+
+$on_mod(Loaded) {
+    // after Geode has set up its own colors for the saved theme
+    Loader::get()->queueInMainThread([] {
+        if (setting("geode-menu")) pinkGeode();
+    });
+    // Geode asks for its mods screen background here; hand it the moving one
+    NodeProvidingEvent("geode.loader/geode-background").listen([](CCNode*& nodeOut, std::string_view) {
+        if (nodeOut || !setting("geode-menu")) return;
+        pinkGeode();
+        if (!setting("enabled")) return;
+        if (auto sprite = makeHost("mods-julia-bg"_spr)) {
+            nodeOut = sprite;
+            startDriver();
+        }
+    }).leak();
 }
 
 class $modify(JuliaLoadingLayer, LoadingLayer) {
