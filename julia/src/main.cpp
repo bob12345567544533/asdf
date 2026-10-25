@@ -24,6 +24,11 @@ bool setting(char const* key) {
     return Mod::get()->getSettingValue<bool>(key);
 }
 
+// the black version of the pack uses black where the normal one uses her purple
+bool blackAccent() {
+    return Mod::get()->getSettingValue<std::string>("accent") == "Black";
+}
+
 bool endsWith(std::string_view s, std::string_view suffix) {
     return s.size() >= suffix.size() && s.substr(s.size() - suffix.size()) == suffix;
 }
@@ -46,6 +51,8 @@ uniform vec2 u_size;   // quad size (points)
 uniform vec2 u_res;    // render target size (pixels)
 uniform vec4 u_offset; // cloud motion
 uniform float u_time;  // seconds (speed applied)
+uniform vec4 u_accent; // her accent colour (rgb) and how strong its hearts are (a)
+uniform vec3 u_bottom; // bottom of the gradient
 
 float hash12(vec2 p) {
     vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -110,9 +117,10 @@ vec4 floaters(vec2 uv, float scale, float speed, float seed, float alpha) {
     float ang = 0.35 * sin(u_time * 0.6 + h3 * 30.0);
     p = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * p;
     float aa = 1.6 * scale / (u_res.y * size);
-    // white, her blue (#D4FFFF) or her purple (#D4D4FF)
+    // white, her blue (#D4FFFF) or her accent (#D4D4FF purple, or black)
     float pick = hash12(cell + seed + 21.7);
-    vec3 col = pick < 0.4 ? vec3(1.0) : (pick < 0.7 ? vec3(0.831, 1.0, 1.0) : vec3(0.831, 0.831, 1.0));
+    vec3 col = pick < 0.4 ? vec3(1.0) : (pick < 0.7 ? vec3(0.831, 1.0, 1.0) : u_accent.rgb);
+    if (pick >= 0.7) alpha *= u_accent.a;
     float d;
     if (h3 < 0.5) {
         d = sdHeart(p);
@@ -128,10 +136,10 @@ vec4 floaters(vec2 uv, float scale, float speed, float seed, float alpha) {
 void main() {
     vec2 uv = v_pos / u_size.y;               // height = 1
     float t = v_pos.y / u_size.y;              // 0 bottom .. 1 top
-    // her pink (#FFD4EA) in the middle, lighter at the top, towards her purple at the bottom
+    // her pink (#FFD4EA) in the middle, lighter at the top, towards her accent at the bottom
     vec3 top = vec3(1.0, 0.902, 0.953);
     vec3 mid = vec3(1.0, 0.831, 0.918);
-    vec3 bottom = vec3(0.894, 0.847, 1.0);
+    vec3 bottom = u_bottom;
     vec3 col = t < 0.45 ? mix(bottom, mid, t / 0.45) : mix(mid, top, (t - 0.45) / 0.55);
     vec2 c = v_pos / u_size - 0.5;
     col = mix(col, vec3(1.0, 0.957, 0.98), 0.28 * clamp(1.0 - 2.2 * dot(c, c), 0.0, 1.0));
@@ -164,6 +172,8 @@ public:
     GLint m_resLoc = -1;
     GLint m_offsetLoc = -1;
     GLint m_timeLoc = -1;
+    GLint m_accentLoc = -1;
+    GLint m_bottomLoc = -1;
     float m_res[2] = { 960.f, 540.f };
     float m_offset[4] = { 0, 0, 0, 0 };
     float m_time = 0.f;
@@ -176,6 +186,8 @@ public:
             ret->m_resLoc = program->getUniformLocationForName("u_res");
             ret->m_offsetLoc = program->getUniformLocationForName("u_offset");
             ret->m_timeLoc = program->getUniformLocationForName("u_time");
+            ret->m_accentLoc = program->getUniformLocationForName("u_accent");
+            ret->m_bottomLoc = program->getUniformLocationForName("u_bottom");
             ret->autorelease();
             return ret;
         }
@@ -191,6 +203,13 @@ public:
         m_program->setUniformLocationWith2f(m_resLoc, m_res[0], m_res[1]);
         m_program->setUniformLocationWith4f(m_offsetLoc, m_offset[0], m_offset[1], m_offset[2], m_offset[3]);
         m_program->setUniformLocationWith1f(m_timeLoc, m_time);
+        if (blackAccent()) {
+            m_program->setUniformLocationWith4f(m_accentLoc, 0.f, 0.f, 0.f, 0.45f);  // black hearts, softer
+            m_program->setUniformLocationWith3f(m_bottomLoc, 1.f, 0.78f, 0.89f);     // a deeper pink
+        } else {
+            m_program->setUniformLocationWith4f(m_accentLoc, 0.831f, 0.831f, 1.f, 1.f);
+            m_program->setUniformLocationWith3f(m_bottomLoc, 0.894f, 0.847f, 1.f);  // towards her purple
+        }
         ccGLBindVAO(0);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         ccGLEnableVertexAttribs(kCCVertexAttribFlag_Position);
@@ -541,6 +560,20 @@ void pinkGeode() {
     };
     for (auto const& c : colors) {
         ColorProvider::get()->override(std::string("geode.loader/") + c.id, c.color);
+    }
+    if (blackAccent()) {
+        // the black version: black where the normal one has her purple
+        static Pink const black[] = {
+            { "mod-list-tab-selected-bg", { 30, 30, 30, 255 } },
+            { "mod-list-tab-selected-bg-alt", { 30, 30, 30, 255 } },
+            { "mod-list-version-label", { 40, 40, 40, 255 } },
+            { "mod-list-featured-color", { 216, 74, 140, 255 } },
+            { "swelvy-bg-4", { 255, 190, 222, 255 } },
+            { "swelvy-bg-5", { 255, 200, 228, 255 } },
+        };
+        for (auto const& c : black) {
+            ColorProvider::get()->override(std::string("geode.loader/") + c.id, c.color);
+        }
     }
 }
 

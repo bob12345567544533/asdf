@@ -3,7 +3,7 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v1.2.0",
+	"version": "v1.3.0",
 	"id": "chaz.made-for-julia",
 	"name": "Made for Julia",
 	"developer": "chaz",
@@ -45,6 +45,16 @@
 			"name": "Clean saved levels",
 			"description": "Saved and favorite levels only keep the back button, the heart and the page arrows.",
 			"default": true
+		},
+		"accent": {
+			"type": "string",
+			"name": "Accent colour",
+			"description": "Match the pack version: Purple for \"Made for Julia\", Black for \"Made for Julia (black)\".",
+			"default": "Purple",
+			"one-of": [
+				"Purple",
+				"Black"
+			]
 		},
 		"speed": {
 			"type": "float",
