@@ -3,11 +3,11 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v1.3.0",
+	"version": "v1.4.0",
 	"id": "chaz.made-for-julia",
-	"name": "Made for Julia",
+	"name": "julia",
 	"developer": "chaz",
-	"description": "The cute moving background for Julia's pink texture pack: soft pink clouds with little hearts and flowers floating up, on every menu, the loading screen and Geode's mods screen.",
+	"description": "The companion mod for Julia's pink texture pack: the moving pink background on every menu, the loading screen and Geode's mods screen, plus a few menu touches.",
 	"early-load": true,
 	"settings": {
 		"enabled": {
@@ -44,6 +44,12 @@
 			"type": "bool",
 			"name": "Clean saved levels",
 			"description": "Saved and favorite levels only keep the back button, the heart and the page arrows.",
+			"default": true
+		},
+		"tidy-menus": {
+			"type": "bool",
+			"name": "Tidy menus",
+			"description": "Profile button in the bottom row of the main menu, a pink settings popup with even text and a Textures button, and soft pink level cards on the main levels page.",
 			"default": true
 		},
 		"accent": {

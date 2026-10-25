@@ -1,4 +1,4 @@
-// Made for Julia: the cute moving background for Julia's pink texture pack.
+// julia: the companion mod for Julia's pink texture pack (the cute moving background and a few menu touches).
 // Soft pink clouds with little hearts and flowers floating up, drawn live by a
 // shader into a small texture that every menu background shows. One clock for
 // every screen, so it keeps floating smoothly when she switches menus.
@@ -6,7 +6,9 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/LevelBrowserLayer.hpp>
 #include <Geode/modify/LoadingLayer.hpp>
+#include <Geode/modify/LevelPage.hpp>
 #include <Geode/modify/MenuLayer.hpp>
+#include <Geode/modify/OptionsLayer.hpp>
 #include <Geode/modify/Slider.hpp>
 #include <Geode/utils/ColorProvider.hpp>
 
@@ -107,14 +109,14 @@ vec4 floaters(vec2 uv, float scale, float speed, float seed, float alpha) {
     vec2 cell = floor(q);
     vec2 f = fract(q) - 0.5;
     float h = hash12(cell + seed);
-    if (h > 0.42) return vec4(0.0);
+    if (h > 0.6) return vec4(0.0);
     float h2 = hash12(cell + seed + 7.3);
     float h3 = hash12(cell + seed + 13.1);
     vec2 o = (vec2(h2, h3) - 0.5) * 0.45;
-    o.x += 0.12 * sin(u_time * 0.9 + h * 40.0); // gentle sway
+    o.x += 0.18 * sin(u_time * 1.1 + h * 40.0); // gentle sway
     float size = 0.22 + 0.12 * h2;
     vec2 p = (f - o) / size;
-    float ang = 0.35 * sin(u_time * 0.6 + h3 * 30.0);
+    float ang = 0.5 * sin(u_time * 0.8 + h3 * 30.0);
     p = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * p;
     float aa = 1.6 * scale / (u_res.y * size);
     // white, her blue (#D4FFFF) or her accent (#D4D4FF purple, or black)
@@ -137,6 +139,23 @@ vec4 floaters(vec2 uv, float scale, float speed, float seed, float alpha) {
     return vec4(col, cover);
 }
 
+// little four-point sparkles that twinkle in and out
+float sparkles(vec2 uv, float scale, float seed) {
+    vec2 q = uv * scale + vec2(0.0, -u_time * 0.02);
+    vec2 cell = floor(q);
+    vec2 f = fract(q) - 0.5;
+    float h = hash12(cell + seed);
+    if (h > 0.45) return 0.0;
+    vec2 o = (vec2(hash12(cell + seed + 3.1), hash12(cell + seed + 5.7)) - 0.5) * 0.6;
+    vec2 p = abs(f - o);
+    float tw = 0.5 + 0.5 * sin(u_time * (1.4 + 2.2 * h) + h * 50.0);
+    float size = 0.13 + 0.07 * h;
+    float d = sqrt(p.x) + sqrt(p.y);               // astroid: a soft four-point star
+    float r = sqrt(size);
+    float aa = 0.035;
+    return smoothstep(r + aa, r - aa, d) * tw * tw;
+}
+
 void main() {
     vec2 uv = v_pos / u_size.y;               // height = 1
     float t = v_pos.y / u_size.y;              // 0 bottom .. 1 top
@@ -154,15 +173,19 @@ void main() {
     vec2 qd = vec2(fbm(p + o), fbm(p + vec2(5.2, 1.3) + vec2(-o.y, o.x)));
     float cl = fbm(p + 2.6 * qd + u_offset.zw);
     cl = smoothstep(0.45, 0.85, cl);
-    col = mix(col, vec3(0.95, 1.0, 1.0), cl * 0.4); // clouds with a touch of her blue
+    col = mix(col, vec3(0.95, 1.0, 1.0), cl * 0.55); // clouds with a touch of her blue
 
     // hearts and flowers, far to near
-    vec4 l1 = floaters(uv, 7.0, 0.020, 3.0, 0.35);
+    vec4 l1 = floaters(uv, 7.0, 0.032, 3.0, 0.35);
     col = mix(col, l1.rgb, l1.a);
-    vec4 l2 = floaters(uv, 4.6, 0.032, 11.0, 0.50);
+    float sp = sparkles(uv, 8.0, 61.0);                 // little pink glints twinkling between them
+    col = mix(col, vec3(1.0, 0.58, 0.8), sp * 0.6);
+    vec4 l2 = floaters(uv, 4.6, 0.050, 11.0, 0.50);
     col = mix(col, l2.rgb, l2.a);
-    vec4 l3 = floaters(uv, 3.0, 0.046, 29.0, 0.65);
+    vec4 l3 = floaters(uv, 3.0, 0.072, 29.0, 0.65);
     col = mix(col, l3.rgb, l3.a);
+    vec4 l4 = floaters(uv, 2.1, 0.100, 47.0, 0.75);     // a few big ones up close
+    col = mix(col, l4.rgb, l4.a);
 
     col += (hash12(gl_FragCoord.xy) - 0.5) / 255.0;
     gl_FragColor = vec4(col, 1.0);
@@ -301,8 +324,8 @@ void redraw() {
     g_lastDraw = g_clock;
     double speed = std::clamp(Mod::get()->getSettingValue<double>("speed"), 0.1, 5.0);
     double t = g_clock * speed;
-    double a = TAU * t / 28.0;
-    double b = TAU * t / 75.6;
+    double a = TAU * t / 16.0;
+    double b = TAU * t / 40.0;
     g_quad->m_offset[0] = static_cast<float>(0.6 * std::cos(a));
     g_quad->m_offset[1] = static_cast<float>(0.6 * std::sin(a));
     g_quad->m_offset[2] = static_cast<float>(0.25 * std::cos(b));
@@ -715,6 +738,96 @@ class $modify(JuliaMenuLayer, MenuLayer) {
             if (auto game = this->getChildByID("main-menu-bg")) game->setVisible(false);
             addHost(this, "menu-julia-bg"_spr, -100);
         }
+        if (setting("tidy-menus")) this->juliaProfileInRow();
         return true;
+    }
+
+    // the profile button becomes the first circle of the bottom row (its name label goes away)
+    void juliaProfileInRow() {
+        auto profileMenu = this->getChildByID("profile-menu");
+        auto bottom = this->getChildByID("bottom-menu");
+        auto profile = profileMenu ? profileMenu->getChildByID("profile-button") : nullptr;
+        if (!profile || !bottom || !bottom->getLayout()) return;
+        float width = profile->getScaledContentSize().width;
+        profile->retain();
+        profile->removeFromParentAndCleanup(false);
+        bottom->addChild(profile, -1);          // lowest z: the row lays it out first (leftmost)
+        profile->release();
+        bottom->setContentWidth(bottom->getContentWidth() + width + 5.f);  // room for it at full size
+        bottom->updateLayout();
+        profileMenu->updateLayout();
+        if (auto name = this->getChildByID("player-username")) name->setVisible(false);
+    }
+};
+
+// Settings: her pink popup panel instead of GD's dark box and frame, every button's text the
+// same size, and Rate (does nothing on PC) becomes Textures, which opens Texture Workshop.
+CCMenuItem* workshopButton() {
+    auto scene = CCDirector::get()->getRunningScene();
+    if (!scene) return nullptr;
+    auto menu = scene->getChildByType<MenuLayer>(0);
+    if (!menu) return nullptr;
+    return typeinfo_cast<CCMenuItem*>(menu->getChildByIDRecursive("uproxide.textures/workshop-button"));
+}
+
+class $modify(JuliaOptionsLayer, OptionsLayer) {
+    void customSetup() {
+        OptionsLayer::customSetup();
+        if (!setting("tidy-menus") || !m_mainLayer) return;
+        // panel
+        if (auto list = m_mainLayer->getChildByID("background")) {
+            auto box = list->boundingBox();
+            if (auto panel = CCScale9Sprite::create("GJ_square01.png")) {
+                panel->setContentSize(box.size);
+                panel->setPosition({ box.getMidX(), box.getMidY() });
+                panel->setID("julia-panel"_spr);
+                m_mainLayer->addChild(panel, list->getZOrder());
+                list->setVisible(false);
+            }
+        }
+        if (!m_optionsMenu) return;
+        // Rate -> Textures (only when Texture Workshop is installed)
+        auto rate = typeinfo_cast<CCMenuItemSpriteExtra*>(m_optionsMenu->getChildByID("rate-button"));
+        if (rate && workshopButton()) {
+            rate->setTarget(this, menu_selector(JuliaOptionsLayer::onJuliaTextures));
+            if (auto sprite = typeinfo_cast<ButtonSprite*>(rate->getNormalImage())) sprite->setString("Textures");
+            rate->setID("textures-button"_spr);
+        }
+        // same text size on every button (the smallest one, so everything still fits)
+        std::vector<CCLabelBMFont*> labels;
+        float smallest = 100.f;
+        for (auto item : CCArrayExt<CCNode*>(m_optionsMenu->getChildren())) {
+            auto button = typeinfo_cast<CCMenuItemSpriteExtra*>(item);
+            auto sprite = button ? typeinfo_cast<ButtonSprite*>(button->getNormalImage()) : nullptr;
+            if (!sprite || !sprite->m_label) continue;
+            labels.push_back(sprite->m_label);
+            smallest = std::min(smallest, sprite->m_label->getScale());
+        }
+        if (labels.size() > 1) {
+            for (auto label : labels) label->setScale(smallest);
+        }
+    }
+
+    void onJuliaTextures(CCObject*) {
+        if (auto button = workshopButton()) button->activate();
+    }
+};
+
+// Main levels: the level card in her light pink instead of a gray see-through box, and the
+// progress bars' background in her colours instead of GD's dark tint.
+class $modify(JuliaLevelPage, LevelPage) {
+    void updateDynamicPage(GJGameLevel* level) {
+        LevelPage::updateDynamicPage(level);
+        if (!setting("tidy-menus")) return;
+        if (m_levelDisplay) {
+            m_levelDisplay->setColor({ 255, 230, 243 });
+            m_levelDisplay->setOpacity(225);
+        }
+        for (auto id : { "normal-progress-bar", "practice-progress-bar" }) {
+            if (auto bar = typeinfo_cast<CCSprite*>(this->getChildByID(id))) {
+                bar->setColor({ 255, 255, 255 });
+                bar->setOpacity(255);
+            }
+        }
     }
 };
