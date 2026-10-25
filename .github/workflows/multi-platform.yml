@@ -8,6 +8,8 @@ on:
     # the texture pack and its companion mod have their own build
     paths-ignore:
       - 'minimal/**'
+      - 'solidtrail/**'
+      - '.github/workflows/solidtrail.yml'
       - 'texturepack/**'
       - '.github/workflows/minimal.yml'
 

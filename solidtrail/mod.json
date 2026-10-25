@@ -1,0 +1,19 @@
+{
+	"geode": "5.11.2",
+	"gd": {
+		"win": "2.2081"
+	},
+	"version": "v1.0.0",
+	"id": "chaz.solid-wave-trail",
+	"name": "Solid Wave Trail",
+	"developer": "chaz",
+	"description": "Makes the wave trail solid instead of glowing, and keeps it that way.",
+	"settings": {
+		"enabled": {
+			"type": "bool",
+			"name": "Solid wave trail",
+			"description": "Draws the wave trail with normal blending (solid color) instead of GD's additive glow.",
+			"default": true
+		}
+	}
+}
