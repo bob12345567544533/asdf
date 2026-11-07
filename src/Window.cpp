@@ -853,7 +853,9 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_PB_TOGGLE: {
             auto values = reinterpret_cast<Values*>(lParam);
-            if (IsWindowVisible(wnd) && !IsIconic(wnd) && !coveredByGame(wnd)) {
+            // any time it's open (even minimized or behind the game) the key hides it completely,
+            // taskbar button included; pressing again brings it back on top
+            if (IsWindowVisible(wnd)) {
                 delete values;
                 hide(wnd);
             }
