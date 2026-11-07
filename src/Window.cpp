@@ -43,7 +43,9 @@ using RectF = gp::RectF;
 // ===========================================================================
 
 constexpr int MAX_TICKS = 24;
-constexpr int SLIDERS = 2;   // buffer, randomize
+constexpr int MAIN_SLIDERS = 2; // buffer, randomize (big rows)
+constexpr int MODE_SLIDERS = 8; // per-mode limits (small grid)
+constexpr int SLIDERS = MAIN_SLIDERS + MODE_SLIDERS;
 constexpr int TOGGLES = 4;
 constexpr int MODES = 8;
 
@@ -55,8 +57,13 @@ constexpr wchar_t const* TOGGLE_HELP[TOGGLES] {
     L"Lets the buffer work in ship mode. Off by default: ship predictions are less reliable.",
     L"Shows in game how early each held-back click was.",
 };
-constexpr wchar_t const* SLIDER_NAMES[SLIDERS] { L"BUFFER", L"RANDOMIZE" };
-constexpr wchar_t const* SLIDER_HELP[SLIDERS] {
+constexpr char const* SLIDER_KEYS[SLIDERS] { "buffer-ticks", "randomize", "max-cube", "max-ship", "max-ball", "max-ufo",
+                                            "max-wave", "max-robot", "max-spider", "max-swing" };
+constexpr wchar_t const* SLIDER_NAMES[SLIDERS] { L"BUFFER", L"RANDOMIZE", L"CUBE", L"SHIP", L"BALL", L"UFO",
+                                                 L"WAVE", L"ROBOT", L"SPIDER", L"SWING" };
+constexpr wchar_t const* MODE_HELP =
+    L"Most this mode may be delayed, in ticks. BUFFER still caps every mode: the lower of the two wins (faded = capped by BUFFER).";
+constexpr wchar_t const* SLIDER_HELP[MAIN_SLIDERS] {
     L"Largest delay the buffer may add to a click that would kill you, in ticks (1 tick = 4.2 ms). Each gamemode can be capped lower in the mod settings. 0 = off.",
     L"0 = always the smallest safe delay. Above 0 = any safe delay up to this many ticks above the smallest one.",
 };
@@ -76,14 +83,19 @@ constexpr uint32_t C_DANGER = 0xff6b6b;
 
 // Layout, in logical pixels (scaled for the monitor)
 constexpr float W = 454.f;
-constexpr float H = 680.f;
+constexpr float H = 680.f + 220.f; // + the per-mode grid (header 30, 4 rows of 46, gap 6)
 constexpr float PAD = 22.f;
 constexpr float TITLE_H = 48.f;
 constexpr float STATS_Y = 49.f;
 constexpr float STATS_H = 60.f;
 constexpr float SLIDER_Y = STATS_Y + STATS_H + 1.f;
 constexpr float SLIDER_H = 82.f;
-constexpr float TOGGLE_Y = SLIDER_Y + SLIDERS * (SLIDER_H + 1.f);
+constexpr float MODE_Y = SLIDER_Y + MAIN_SLIDERS * (SLIDER_H + 1.f);
+constexpr float MODE_HEAD = 30.f;
+constexpr float MODE_CELL_H = 46.f;
+constexpr float MODE_GAP = 24.f;  // between the two columns
+constexpr int MODE_ROWS = MODE_SLIDERS / 2;
+constexpr float TOGGLE_Y = MODE_Y + MODE_HEAD + MODE_ROWS * MODE_CELL_H + 6.f;
 constexpr float TOGGLE_H = 38.f;
 constexpr float LOG_Y = TOGGLE_Y + TOGGLES * TOGGLE_H + 14.f;
 constexpr float FOOTER_H = 30.f;
@@ -102,7 +114,7 @@ constexpr UINT WM_DPI_CHANGED = 0x02E0;
 // ===========================================================================
 
 struct Values {
-    int sliders[SLIDERS] { 2, 3 }; // max ticks, randomize
+    int sliders[SLIDERS] { 2, 3, 24, 8, 24, 6, 8, 24, 24, 6 }; // max ticks, randomize, per-mode limits
     bool toggles[TOGGLES] { true, true, false, true };
     bool hasPos = false;
     int x = 0;
@@ -157,8 +169,7 @@ bool g_placed = false;
 Values readSettings() {
     auto mod = Mod::get();
     Values v;
-    v.sliders[0] = static_cast<int>(mod->getSettingValue<int64_t>("buffer-ticks"));
-    v.sliders[1] = static_cast<int>(mod->getSettingValue<int64_t>("randomize"));
+    for (int i = 0; i < SLIDERS; ++i) v.sliders[i] = static_cast<int>(mod->getSettingValue<int64_t>(SLIDER_KEYS[i]));
     for (int i = 0; i < TOGGLES; ++i) v.toggles[i] = mod->getSettingValue<bool>(TOGGLE_KEYS[i]);
     v.hasPos = mod->getSavedValue<bool>("window-has-pos", false);
     v.x = static_cast<int>(mod->getSavedValue<int64_t>("window-x", 0));
@@ -174,8 +185,7 @@ void writeSettings(Values const& v) {
     auto setInt = [&](char const* key, int value) {
         if (mod->getSettingValue<int64_t>(key) != value) mod->setSettingValue<int64_t>(key, value);
     };
-    setInt("buffer-ticks", v.sliders[0]);
-    setInt("randomize", v.sliders[1]);
+    for (int i = 0; i < SLIDERS; ++i) setInt(SLIDER_KEYS[i], v.sliders[i]);
     for (int i = 0; i < TOGGLES; ++i) {
         if (mod->getSettingValue<bool>(TOGGLE_KEYS[i]) != v.toggles[i]) mod->setSettingValue<bool>(TOGGLE_KEYS[i], v.toggles[i]);
     }
@@ -406,16 +416,24 @@ constexpr int HIT_SLIDER = 20; // + slider
 
 RectF closeRect() { return box(W - PAD - 28.f, 12.f, 28.f, 24.f); }
 RectF minimizeRect() { return box(W - PAD - 58.f, 12.f, 28.f, 24.f); }
-RectF sliderRow(int i) { return box(PAD, SLIDER_Y + i * (SLIDER_H + 1.f), W - 2 * PAD, SLIDER_H); }
-float trackY(int i) { return sliderRow(i).Y + 58.f; }
+bool isMode(int i) { return i >= MAIN_SLIDERS; }
+RectF sliderRow(int i) {
+    if (!isMode(i)) return box(PAD, SLIDER_Y + i * (SLIDER_H + 1.f), W - 2 * PAD, SLIDER_H);
+    int k = i - MAIN_SLIDERS;
+    float cw = (W - 2 * PAD - MODE_GAP) / 2.f;
+    return box(PAD + (k % 2) * (cw + MODE_GAP), MODE_Y + MODE_HEAD + (k / 2) * MODE_CELL_H, cw, MODE_CELL_H);
+}
+float trackY(int i) { return sliderRow(i).Y + (isMode(i) ? 33.f : 58.f); }
+float trackX0(int i) { return isMode(i) ? sliderRow(i).X + 6.f : TRACK_X0; }
+float trackX1(int i) { return isMode(i) ? sliderRow(i).X + sliderRow(i).Width - 6.f : TRACK_X1; }
 RectF toggleRow(int i) { return box(PAD, TOGGLE_Y + i * TOGGLE_H, W - 2 * PAD, TOGGLE_H); }
 RectF footerRect() { return box(PAD, H - 14.f - FOOTER_H, W - 2 * PAD, FOOTER_H); }
 RectF logRect() { return box(PAD, LOG_Y, W - 2 * PAD, footerRect().Y - 8.f - LOG_Y); }
 
-float thumbX(int v) { return TRACK_X0 + (TRACK_X1 - TRACK_X0) * (static_cast<float>(v) / MAX_TICKS); }
+float thumbX(int i, int v) { return trackX0(i) + (trackX1(i) - trackX0(i)) * (static_cast<float>(v) / MAX_TICKS); }
 
-int valueAt(float x) {
-    float t = (x - TRACK_X0) / (TRACK_X1 - TRACK_X0);
+int valueAt(int i, float x) {
+    float t = (x - trackX0(i)) / (trackX1(i) - trackX0(i));
     return std::clamp(static_cast<int>(std::lround(t * MAX_TICKS)), 0, MAX_TICKS);
 }
 
@@ -435,7 +453,7 @@ int hitTest(float x, float y) {
 
 std::wstring help() {
     int h = g_dragging >= 0 ? HIT_SLIDER + g_dragging : g_hover;
-    if (within(h, HIT_SLIDER, SLIDERS)) return SLIDER_HELP[h - HIT_SLIDER];
+    if (within(h, HIT_SLIDER, SLIDERS)) return isMode(h - HIT_SLIDER) ? MODE_HELP : SLIDER_HELP[h - HIT_SLIDER];
     if (within(h, HIT_TOGGLE, TOGGLES)) return TOGGLE_HELP[h - HIT_TOGGLE];
     return {};
 }
@@ -495,8 +513,31 @@ void paintStats(gp::Graphics& g) {
     hline(g, STATS_Y + STATS_H);
 }
 
+void paintModeLimits(gp::Graphics& g) {
+    spaced(g, L"PER MODE", Face::Ui, 11.f, col(C_MUTED), box(PAD, MODE_Y + 8.f, W - 2 * PAD, 18.f));
+    for (int i = MAIN_SLIDERS; i < SLIDERS; ++i) {
+        RectF r = sliderRow(i);
+        bool active = g_hover == HIT_SLIDER + i || g_dragging == i;
+        if (active) fill(g, box(r.X - 6.f, r.Y + 1.f, r.Width + 12.f, r.Height - 2.f), col(C_HOVER));
+        int v = g_values.sliders[i];
+        bool capped = v > g_values.sliders[0];  // BUFFER is lower, so it wins
+        RectF head = box(r.X, r.Y + 6.f, r.Width, 18.f);
+        spaced(g, SLIDER_NAMES[i], Face::Ui, 10.f, col(active ? C_TEXT : C_MUTED), head);
+        auto value = v > 0 ? std::to_wstring(v) : std::wstring(L"off");
+        text(g, value, Face::Semi, 12.f, col(capped ? C_FAINT : C_TEXT), head, RIGHT);
+        float y = trackY(i);
+        float x0 = trackX0(i);
+        float x1 = trackX1(i);
+        float hx = thumbX(i, v);
+        fill(g, box(x0, y - 1.f, x1 - x0, 2.f), col(C_TRACK));
+        if (hx > x0) fill(g, box(x0, y - 1.f, hx - x0, 2.f), col(capped ? C_FAINT : C_TEXT));
+        circle(g, hx, y, 5.f, col(active ? 0xffffff : capped ? C_MUTED : C_TEXT));
+    }
+    hline(g, TOGGLE_Y - 3.f);
+}
+
 void paintSliders(gp::Graphics& g) {
-    for (int i = 0; i < SLIDERS; ++i) {
+    for (int i = 0; i < MAIN_SLIDERS; ++i) {
         RectF row = sliderRow(i);
         bool active = g_hover == HIT_SLIDER + i || g_dragging == i;
         if (active) fill(g, box(row.X - 6.f, row.Y + 1.f, row.Width + 12.f, row.Height - 2.f), col(C_HOVER));
@@ -519,7 +560,7 @@ void paintSliders(gp::Graphics& g) {
         }
 
         float y = trackY(i);
-        float hx = thumbX(v);
+        float hx = thumbX(i, v);
         fill(g, box(TRACK_X0, y - 1.f, TRACK_X1 - TRACK_X0, 2.f), col(C_TRACK));
         if (hx > TRACK_X0) fill(g, box(TRACK_X0, y - 1.f, hx - TRACK_X0, 2.f), col(C_TEXT));
         circle(g, hx, y, 7.f, col(active ? 0xffffff : C_TEXT));
@@ -612,6 +653,7 @@ void paintScene(gp::Graphics& g) {
     paintTitle(g);
     paintStats(g);
     paintSliders(g);
+    paintModeLimits(g);
     paintToggles(g);
     paintLog(g);
     paintFooter(g);
@@ -937,7 +979,7 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             float x = logicalX(lParam);
             float y = logicalY(lParam);
             if (g_dragging >= 0) {
-                setSlider(wnd, g_dragging, valueAt(x));
+                setSlider(wnd, g_dragging, valueAt(g_dragging, x));
                 return 0;
             }
             updateHover(wnd, x, y);
@@ -972,10 +1014,11 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 int i = hit - HIT_SLIDER;
                 g_focus = i;
                 // grab only near the track itself
-                if (std::abs(y - trackY(i)) <= 16.f && x >= TRACK_X0 - 14.f && x <= TRACK_X1 + 14.f) {
+                float reach = isMode(i) ? 12.f : 16.f;
+                if (std::abs(y - trackY(i)) <= reach && x >= trackX0(i) - 10.f && x <= trackX1(i) + 10.f) {
                     g_dragging = i;
                     SetCapture(wnd);
-                    setSlider(wnd, i, valueAt(x));
+                    setSlider(wnd, i, valueAt(i, x));
                 }
             }
             return 0;
