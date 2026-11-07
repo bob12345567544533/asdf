@@ -3,7 +3,7 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v2.0.0",
+	"version": "v2.1.0",
 	"id": "ai.predictivebuffer",
 	"name": "Predictive Input Buffer",
 	"developer": "lilWC",
@@ -17,7 +17,7 @@
 		"buffer-ticks": {
 			"type": "int",
 			"name": "Max Ticks",
-			"description": "Largest delay the buffer may add, in 240 TPS ticks (1 tick = 4.17 ms). Wave stops at 8. The toggle key cycles 2 / 4 / 8 / 16 / off.",
+			"description": "Largest delay the buffer may add, in 240 TPS ticks (1 tick = 4.17 ms). Each gamemode can be capped lower below. The toggle key cycles 2 / 4 / 8 / 16 / off.",
 			"default": 2,
 			"min": 0,
 			"max": 24,
@@ -55,6 +55,119 @@
 			"name": "Timing Popup",
 			"default": true,
 			"description": "Shows in game how early each held-back click was."
+		},
+		"practice-only": {
+			"type": "bool",
+			"name": "Practice Mode Only",
+			"default": false,
+			"description": "Only helps in practice mode."
+		},
+		"death-check": {
+			"type": "bool",
+			"name": "Death Check",
+			"default": true,
+			"description": "When you die within a second of the buffer changing an input, says so in game and in the window, so you know if it helped or hurt."
+		},
+		"modes-title": {
+			"type": "title",
+			"name": "Per-mode limits",
+			"description": "The most each gamemode may be delayed, on top of Max Ticks (the lower of the two wins)."
+		},
+		"max-cube": {
+			"type": "int",
+			"name": "Cube",
+			"description": "Largest delay in cube mode, in ticks.",
+			"default": 24,
+			"min": 0,
+			"max": 24,
+			"control": {
+				"arrow-step": 1,
+				"slider-step": 1
+			}
+		},
+		"max-ship": {
+			"type": "int",
+			"name": "Ship",
+			"description": "Largest delay in ship mode, in ticks.",
+			"default": 8,
+			"min": 0,
+			"max": 24,
+			"control": {
+				"arrow-step": 1,
+				"slider-step": 1
+			}
+		},
+		"max-ball": {
+			"type": "int",
+			"name": "Ball",
+			"description": "Largest delay in ball mode, in ticks.",
+			"default": 24,
+			"min": 0,
+			"max": 24,
+			"control": {
+				"arrow-step": 1,
+				"slider-step": 1
+			}
+		},
+		"max-ufo": {
+			"type": "int",
+			"name": "UFO",
+			"description": "Largest delay in UFO mode, in ticks.",
+			"default": 6,
+			"min": 0,
+			"max": 24,
+			"control": {
+				"arrow-step": 1,
+				"slider-step": 1
+			}
+		},
+		"max-wave": {
+			"type": "int",
+			"name": "Wave",
+			"description": "Largest delay in wave mode, in ticks.",
+			"default": 8,
+			"min": 0,
+			"max": 24,
+			"control": {
+				"arrow-step": 1,
+				"slider-step": 1
+			}
+		},
+		"max-robot": {
+			"type": "int",
+			"name": "Robot",
+			"description": "Largest delay in robot mode, in ticks.",
+			"default": 24,
+			"min": 0,
+			"max": 24,
+			"control": {
+				"arrow-step": 1,
+				"slider-step": 1
+			}
+		},
+		"max-spider": {
+			"type": "int",
+			"name": "Spider",
+			"description": "Largest delay in spider mode, in ticks.",
+			"default": 24,
+			"min": 0,
+			"max": 24,
+			"control": {
+				"arrow-step": 1,
+				"slider-step": 1
+			}
+		},
+		"max-swing": {
+			"type": "int",
+			"name": "Swing",
+			"description": "Largest delay in swing mode, in ticks.",
+			"default": 6,
+			"min": 0,
+			"max": 24,
+			"control": {
+				"arrow-step": 1,
+				"slider-step": 1
+			}
 		},
 		"keys-title": {
 			"type": "title",
@@ -96,6 +209,42 @@
 			"name": "Checks",
 			"description": "How the hidden ghost judges a delay. All on is best; each can be switched off on its own."
 		},
+		"finer-timing": {
+			"type": "bool",
+			"name": "Finer Timing",
+			"default": true,
+			"description": "Delays in quarter ticks instead of whole ticks, fired in the middle of a physics step, so a click moves only as much as it has to (not in dual)."
+		},
+		"best-fix": {
+			"type": "bool",
+			"name": "Best Fix",
+			"default": true,
+			"description": "Compares the safe delays further ahead and takes the one that keeps you alive longest, not just the first one that works."
+		},
+		"confidence-check": {
+			"type": "bool",
+			"name": "Only When Sure",
+			"default": true,
+			"description": "Before helping, checks a slightly later click and slightly different steps. If any of them dies, your input goes through untouched."
+		},
+		"moving-objects": {
+			"type": "bool",
+			"name": "See Moving Objects",
+			"default": true,
+			"description": "The ghost moves blocks and spikes that are moving (move triggers) along with it instead of treating them as still."
+		},
+		"hold-fix": {
+			"type": "bool",
+			"name": "Hold Fix (wave / ship)",
+			"default": true,
+			"description": "When holding on a little too long would kill you and letting go right then is safe, lets go for you (within the mode's limit). Ship only when Ship is on."
+		},
+		"through-pads": {
+			"type": "bool",
+			"name": "Use Pads And Portals",
+			"default": true,
+			"description": "The ghost uses yellow / pink / red pads, speed portals and gravity portals itself, so the buffer still helps near them. Pads start working once you've hit that pad type once."
+		},
 		"fresh-ghost": {
 			"type": "bool",
 			"name": "Fresh Ghost",
@@ -104,8 +253,8 @@
 		},
 		"stop-at-portals": {
 			"type": "bool",
-			"name": "Stop At Portals / Pads / Orbs",
-			"description": "The ghost can't use portals, pads or orbs, so a check that reaches one counts as unknown instead of flying through it.",
+			"name": "Stop At Orbs / Mode Portals",
+			"description": "Things the ghost can't use itself (orbs, mode / size / dual / mirror / teleport portals) end a check as unknown, so your input goes through untouched.",
 			"default": true
 		},
 		"smart-safety": {

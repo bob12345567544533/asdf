@@ -57,7 +57,7 @@ constexpr wchar_t const* TOGGLE_HELP[TOGGLES] {
 };
 constexpr wchar_t const* SLIDER_NAMES[SLIDERS] { L"BUFFER", L"RANDOMIZE" };
 constexpr wchar_t const* SLIDER_HELP[SLIDERS] {
-    L"Largest delay the buffer may add to a click that would kill you, in ticks (1 tick = 4.2 ms). Wave stops at 8. 0 = off.",
+    L"Largest delay the buffer may add to a click that would kill you, in ticks (1 tick = 4.2 ms). Each gamemode can be capped lower in the mod settings. 0 = off.",
     L"0 = always the smallest safe delay. Above 0 = any safe delay up to this many ticks above the smallest one.",
 };
 constexpr wchar_t const* IDLE_HELP = L"Hover something to see what it does  ·  F7 shows / hides this window";

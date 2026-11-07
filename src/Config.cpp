@@ -8,6 +8,9 @@ namespace pb {
 
 namespace {
 Config g_config;
+
+constexpr char const* MODE_KEYS[MODES] { "max-cube", "max-ship", "max-ball", "max-ufo", "max-wave", "max-robot",
+                                         "max-spider", "max-swing" };
 }
 
 Config const& config() {
@@ -22,9 +25,18 @@ void loadConfig() {
     c.enabled = flag("enabled");
     c.maxTicks = std::clamp(num("buffer-ticks"), 0, MAX_TICKS);
     c.randomize = std::clamp(num("randomize"), 0, MAX_TICKS);
+    for (int i = 0; i < MODES; ++i) c.modeMax[i] = std::clamp(num(MODE_KEYS[i]), 0, MAX_TICKS);
     c.releases = flag("buffer-releases");
     c.ship = flag("buffer-ship");
     c.popup = flag("show-feedback");
+    c.practiceOnly = flag("practice-only");
+    c.deathCheck = flag("death-check");
+    c.finerTiming = flag("finer-timing");
+    c.bestFix = flag("best-fix");
+    c.confidence = flag("confidence-check");
+    c.movingObjects = flag("moving-objects");
+    c.holdFix = flag("hold-fix");
+    c.throughPads = flag("through-pads");
     c.freshGhost = flag("fresh-ghost");
     c.stopAtPortals = flag("stop-at-portals");
     c.smartSafety = flag("smart-safety");
@@ -48,7 +60,7 @@ std::string cycleStage() {
     }
     mod->setSettingValue<int64_t>("buffer-ticks", next);
     mod->setSettingValue<bool>("enabled", true);
-    return fmt::format("Buffer on: up to {} ticks ({} in wave)", next, std::min(next, WAVE_CAP));
+    return fmt::format("Buffer on: up to {} ticks ({} in wave)", next, std::min(next, g_config.modeMax[WAVE]));
 }
 
 } // namespace pb

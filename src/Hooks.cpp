@@ -92,6 +92,60 @@ bool stopsGhost(GameObject* object, PlayerObject* ghost) {
     }
 }
 
+bool isSolid(GameObject* obj) {
+    auto type = static_cast<unsigned>(obj->m_objectType);
+    return type <= 47 && ((0x808002000005ull >> type) & 1);
+}
+
+float speedOf(GameObject* obj) {
+    switch (obj->m_objectID) {
+        case 200: return 0.7f;
+        case 201: return 0.9f;
+        case 202: return 1.1f;
+        case 203: return 1.3f;
+        case 1334: return 1.6f;
+        default: return 0.f;
+    }
+}
+
+// Pads turn themselves off for the ghost if GD ever marks one as used because of
+// a ghost bump (it shouldn't: that's the level's job, not the player's).
+bool g_padsSafe = true;
+
+enum class Use { Used, Ignored, Unsupported };
+
+// The ghost touched something that isn't solid: use it if the ghost can.
+Use useObject(GameObject* obj, PlayerObject* ghost) {
+    if (float speed = speedOf(obj); speed > 0.f) {
+        if (std::abs(ghost->m_playerSpeed - speed) <= 0.01f) return Use::Ignored;
+        return pb::ghost::useSpeedPortal(ghost, obj, speed) ? Use::Used : Use::Unsupported;
+    }
+    switch (obj->m_objectType) {
+        case GameObjectType::InverseGravityPortal:
+        case GameObjectType::NormalGravityPortal:
+        case GameObjectType::GravityTogglePortal:
+            return pb::ghost::useGravityPortal(ghost, obj) ? Use::Used : Use::Unsupported;
+        case GameObjectType::YellowJumpPad:
+        case GameObjectType::PinkJumpPad:
+        case GameObjectType::RedJumpPad: {
+            if (!g_padsSafe) return Use::Unsupported;
+            bool wasActivated = obj->m_isActivated;
+            auto layer = PlayLayer::get();
+            bool wasUsed = layer && layer->m_player1 && obj->hasBeenActivatedByPlayer(layer->m_player1);
+            bool ok = pb::ghost::usePad(ghost, obj);
+            bool nowUsed = layer && layer->m_player1 && obj->hasBeenActivatedByPlayer(layer->m_player1);
+            if (obj->m_isActivated != wasActivated || nowUsed != wasUsed) {
+                obj->m_isActivated = wasActivated;
+                g_padsSafe = false;
+                log::warn("pad simulation turned off: a ghost bump changed the pad's state");
+            }
+            return ok ? Use::Used : Use::Unsupported;
+        }
+        default:
+            return Use::Unsupported;
+    }
+}
+
 #ifdef GEODE_IS_WINDOWS
 // Safety net: paused or outside a level the cursor must be visible.
 class CursorGuard : public CCObject {
@@ -142,7 +196,10 @@ class $modify(PBPlayLayer, PlayLayer) {
         }
         PlayLayer::destroyPlayer(player, object);
         // only a real death drops what's held back (noclip calls this without dying)
-        if (player && player->m_isDead) pb::buffer::reset();
+        if (player && player->m_isDead) {
+            if (player == m_player1) pb::buffer::died(this);
+            pb::buffer::reset();
+        }
         if (player == m_player1 && player->m_isDead) pb::window::death(levelPercent(this));
     }
 
@@ -180,28 +237,43 @@ class $modify(GJBaseGameLayer) {
         GJBaseGameLayer::handleButton(down, button, isPlayer1);
     }
 
-    // Ghosts only touch blocks, spikes, slopes and collision objects. Portals,
-    // pads and orbs (which they can't use) end the run as "can't tell".
+    // Ghosts touch blocks, spikes, slopes and collision objects as normal. Pads,
+    // speed and gravity portals they use themselves (see Ghost.cpp); anything else
+    // they can't use (orbs, mode portals...) ends the run as "can't tell".
+    // For the real player this also notes the objects around it, so the ghost can
+    // tell which ones are moving.
     void collisionCheckObjects(PlayerObject* player, gd::vector<GameObject*>* objects, int count, float dt) {
-        if (!pb::ghost::running() || !objects) {
+        if (!objects) return GJBaseGameLayer::collisionCheckObjects(player, objects, count, dt);
+        int n = std::min<int>(count, static_cast<int>(objects->size()));
+        if (!pb::ghost::running()) {
+            auto layer = PlayLayer::get();
+            if (pb::config().movingObjects && layer && static_cast<GJBaseGameLayer*>(layer) == static_cast<GJBaseGameLayer*>(this)
+                && player && (player == layer->m_player1 || player == layer->m_player2)) {
+                double px = player->getPositionX();
+                double clock = pb::buffer::clock();
+                for (int i = 0; i < n; ++i) {
+                    auto obj = (*objects)[i];
+                    if (!obj || !isSolid(obj)) continue;
+                    if (obj->m_positionX < px - 90.0 || obj->m_positionX > px + 330.0) continue;
+                    pb::ghost::track(obj, clock);
+                }
+            }
             return GJBaseGameLayer::collisionCheckObjects(player, objects, count, dt);
         }
         static gd::vector<GameObject*> solid;
         solid.clear();
-        int n = std::min<int>(count, static_cast<int>(objects->size()));
         solid.reserve(std::max(n, 0));
-        bool watchStops = pb::config().stopAtPortals;
+        auto const& cfg = pb::config();
         for (int i = 0; i < n; ++i) {
             auto obj = (*objects)[i];
             if (!obj) continue;
-            auto type = static_cast<unsigned>(obj->m_objectType);
-            if (type <= 47 && ((0x808002000005ull >> type) & 1)) {
+            if (isSolid(obj)) {
                 solid.push_back(obj);
+                continue;
             }
-            else if (watchStops && !pb::ghost::stopped() && stopsGhost(obj, player)
-                     && player->getObjectRect().intersectsRect(obj->getObjectRect())) {
-                pb::ghost::markStopped();
-            }
+            if (pb::ghost::stopped() || !player->getObjectRect().intersectsRect(obj->getObjectRect())) continue;
+            auto use = cfg.throughPads ? useObject(obj, player) : Use::Unsupported;
+            if (use == Use::Unsupported && cfg.stopAtPortals && stopsGhost(obj, player)) pb::ghost::markStopped();
         }
         GJBaseGameLayer::collisionCheckObjects(player, &solid, static_cast<int>(solid.size()), dt);
     }
@@ -222,15 +294,36 @@ class $modify(PlayerObject) {
         (void)self.setHookPriority("PlayerObject::playSpiderDashEffect", FIRST);
         (void)self.setHookPriority("PlayerObject::incrementJumps", FIRST);
         (void)self.setHookPriority("PlayerObject::ringJump", FIRST);
+        (void)self.setHookPriority("PlayerObject::playBumpEffect", FIRST);
     }
 
     void update(float dt) {
         if (pb::ghost::running()) return PlayerObject::update(dt);
         auto layer = PlayLayer::get();
-        bool player1 = layer && this == layer->m_player1;
-        if (player1) pb::buffer::beforeStep(layer, dt);
-        PlayerObject::update(dt);
-        if (player1) pb::buffer::afterStep(layer, dt);
+        if (!layer || this != layer->m_player1) return PlayerObject::update(dt);
+        float split = pb::buffer::beforeStep(layer, dt);
+        if (split > 0.f && split < 1.f) {
+            // finer timing: the held-back input lands `split` of the way into this step
+            PlayerObject::update(dt * split);
+            pb::buffer::fireSplit(layer);
+            PlayerObject::update(dt * (1.f - split));
+        }
+        else {
+            PlayerObject::update(dt);
+        }
+        pb::buffer::afterStep(layer, dt);
+    }
+
+    // The real player used a pad: remember how hard GD bumps for it (the ghost
+    // bumps the same way). Ghost bumps never show effects.
+    void bumpPlayer(float bumpMod, int objectType, bool noEffects, GameObject* object) {
+        if (!pb::ghost::running()) pb::ghost::learnBump(objectType, bumpMod);
+        PlayerObject::bumpPlayer(bumpMod, objectType, noEffects, object);
+    }
+
+    void playBumpEffect(int objectType, GameObject* object) {
+        if (pb::ghost::running()) return;
+        PlayerObject::playBumpEffect(objectType, object);
     }
 
     void ringJump(RingObject* ring, bool skipCheck) {
