@@ -3,7 +3,7 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v2.1.0",
+	"version": "v2.1.1",
 	"id": "ai.predictivebuffer",
 	"name": "Predictive Input Buffer",
 	"developer": "lilWC",
@@ -209,11 +209,11 @@
 			"name": "Checks",
 			"description": "How the hidden ghost judges a delay. All on is best; each can be switched off on its own."
 		},
-		"finer-timing": {
+		"finer-timing-v2": {
 			"type": "bool",
-			"name": "Finer Timing",
-			"default": true,
-			"description": "Delays in quarter ticks instead of whole ticks, fired in the middle of a physics step, so a click moves only as much as it has to (not in dual)."
+			"name": "Finer Timing (experimental)",
+			"default": false,
+			"description": "Delays in quarter ticks fired in the middle of a physics step. Off by default: in game the mid-step click can land differently than predicted (jumps dying at the end)."
 		},
 		"best-fix": {
 			"type": "bool",
