@@ -24,6 +24,8 @@ struct Setup {
     // For a press: let go this many steps after it (your usual tap in this mode).
     // 0 = keep holding for the whole check.
     int tapSteps = 0;
+    // NOW with down = true while the button is already held: keep holding (no new click).
+    bool keepHolding = false;
 };
 
 struct Result {

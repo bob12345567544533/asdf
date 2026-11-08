@@ -271,8 +271,14 @@ Result run(PlayLayer* layer, Setup const& s, double delay, bool down, int horizo
     for (int i = 0; i < count; ++i) {
         if (s.fresh) freshen(g_ghost[i]);
         mirror(g_ghost[i], real[i]);
-        if (now) press(i, down);
-        else if (delay > 0.0 || rem > 0.f) press(i, !down); // the button as it is now, until the input
+        if (now) {
+            press(i, down);
+            if (s.keepHolding) g_ready[i] = false; // still the same hold, not a new click
+        }
+        else if (delay > 0.0 || rem > 0.f) {
+            press(i, !down);     // the button as it is now, until the input
+            g_ready[i] = false;  // a hold from before the check isn't a click an orb can take
+        }
     }
     bool applied = now;
     double t = 0.0; // steps since the input arrived (for moving objects)

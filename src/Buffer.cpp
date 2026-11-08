@@ -394,7 +394,9 @@ bool holdFix(PlayLayer* layer, PlayerObject* p1, PlayerObject* p2) {
     setup.flying = true;
     setup.fresh = cfg.freshGhost;
 
-    auto hold = ghost::run(layer, setup, ghost::NOW, true, limit + 1);
+    auto holdSetup = setup;
+    holdSetup.keepHolding = true;
+    auto hold = ghost::run(layer, holdSetup, ghost::NOW, true, limit + 1);
     if (hold.hitStop || hold.survived >= limit) return false; // holding on is fine (or can't tell)
     bool mini = p1->m_vehicleSize < 1.f;
     int horizon = wave ? (mini ? 28 : 38) : 48;
