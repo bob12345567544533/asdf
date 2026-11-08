@@ -136,6 +136,7 @@ struct Choice {
     bool loose = false;  // only passed the looser rule
     bool better = false; // best fix picked a later delay that lasts longer
     bool sure = false;   // passed the confidence check
+    char const* why = "no safe delay within the limit"; // when there's no fix
 };
 
 // Finds the delay for an input that would kill you as it is.
@@ -250,15 +251,8 @@ Choice choose(PlayLayer* layer, ghost::Setup const& setup, bool down, bool wave,
     // Confidence: only help when a hair later and slightly different steps agree.
     // If they don't, try the next safe delays; if none holds up, leave the input alone.
     if (cfg.confidence) {
-        auto sure = [&](double d) {
-            if (!passes(d, ghost::run(layer, setup, d + 0.25, down, horizon))) return false;
-            for (float scale : { 0.97f, 1.03f }) {
-                auto variant = setup;
-                variant.dt = setup.dt * scale;
-                if (!passes(d, ghost::run(layer, variant, d, down, horizon))) return false;
-            }
-            return true;
-        };
+        // a quarter tick later has to work too, so the fix isn't sitting on a knife edge
+        auto sure = [&](double d) { return passes(d, ghost::run(layer, setup, d + 0.25, down, horizon)); };
         std::vector<double> order { chosen };
         if (chosen != pick) order.push_back(pick);
         for (int d : best) {
@@ -277,7 +271,7 @@ Choice choose(PlayLayer* layer, ghost::Setup const& setup, bool down, bool wave,
                 break;
             }
         }
-        if (!found) return Choice { .base = base };
+        if (!found) return Choice { .base = base, .why = "not sure (only works on a knife edge)" };
         c.sure = true;
     }
 
@@ -338,14 +332,6 @@ bool holdFix(PlayLayer* layer, PlayerObject* p1, PlayerObject* p2) {
     int horizon = wave ? (mini ? 28 : 38) : 48;
     auto letGo = ghost::run(layer, setup, 0, false, horizon);
     if (letGo.hitStop || letGo.survived < horizon) return false; // letting go doesn't save you either
-    if (cfg.confidence) {
-        for (float scale : { 0.97f, 1.03f }) {
-            auto variant = setup;
-            variant.dt = setup.dt * scale;
-            auto r = ghost::run(layer, variant, 0, false, horizon);
-            if (r.hitStop || r.survived < horizon) return false;
-        }
-    }
 
     feed(layer, false);
     g_autoReleased = true;
@@ -449,7 +435,13 @@ bool take(PlayLayer* layer, bool down, bool isPlayer1) {
     if (now.hitStop || now.survived >= horizon) return pass();
 
     auto c = choose(layer, setup, down, wave, horizon, limit, now.survived);
-    if (c.delay <= 0.0) return pass();
+    if (c.delay <= 0.0) {
+        auto line = fmt::format("{}% {} would hit something: let through ({}, limit {})", percentOf(layer),
+            down ? "click" : "release", c.why, limit);
+        log::info("{}", line);
+        window::note(line);
+        return pass();
+    }
 
     g_pending = {};
     g_pending.active = true;

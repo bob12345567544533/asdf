@@ -225,7 +225,7 @@
 			"type": "bool",
 			"name": "Only When Sure",
 			"default": true,
-			"description": "Before helping, checks a slightly later click and slightly different steps. If any of them dies, your input goes through untouched."
+			"description": "Before helping, checks that a quarter tick later would also be safe, so it never fixes a click on a knife edge. If not, your input goes through untouched."
 		},
 		"moving-objects": {
 			"type": "bool",
