@@ -25,5 +25,6 @@ void note(std::string const& line);
 void saved(Save const& save);
 void attempt(int number, bool newLevel);
 void death(int percent);
+void accuracy(int checks, int hits); // self-check: predictions compared / right
 
 } // namespace pb::window

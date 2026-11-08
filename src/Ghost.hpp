@@ -26,7 +26,18 @@ struct Setup {
     int tapSteps = 0;
     // NOW with down = true while the button is already held: keep holding (no new click).
     bool keepHolding = false;
+    // Self-check: where player 1 is at the end of each step after the input (up to recordMax).
+    std::vector<cocos2d::CCPoint>* record = nullptr;
+    int recordMax = 0;
 };
+
+// What the last run did that a prediction could get wrong (for the self-check).
+struct RunInfo {
+    bool pad = false;   // used a pad, speed or gravity portal
+    bool orb = false;   // used an orb
+    bool moved = false; // moved objects that were moving
+};
+RunInfo lastRun();
 
 struct Result {
     int survived = 0;             // steps it lived after the input went in

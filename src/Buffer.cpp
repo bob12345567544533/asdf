@@ -70,6 +70,24 @@ PlayLayer* g_layer = nullptr;
 
 int modeOf(PlayerObject* p);
 
+// Self-check: where the ghost said player 1 would be for the first steps after a
+// held-back input, compared with where it really is once that input fires.
+constexpr float CHECK_TOLERANCE = 0.5f; // units (a block is 30)
+struct Check {
+    bool armed = false;  // the input is still held back
+    bool active = false; // it fired: comparing step by step
+    bool holdMatters = false; // robot / wave / ship: your own release changes the path
+    std::vector<CCPoint> predicted;
+    size_t sample = 0;
+    float worst = 0.f;
+    bool tags[static_cast<int>(Feature::Count)] {};
+};
+Check g_check;
+int g_checks = 0;
+int g_hits = 0;
+int g_tagChecks[static_cast<int>(Feature::Count)] {};
+int g_tagMisses[static_cast<int>(Feature::Count)] {};
+
 // Your taps (steps from press to release) per mode, newest last, and the press being timed.
 std::vector<int> g_taps[MODES];
 long long g_pressAt = -1;
@@ -90,14 +108,16 @@ void loadTaps() {
     }
 }
 
-// Your usual tap in a mode (median of the recent ones), 0 = not known yet.
-int usualTap(int mode) {
+// Your taps in a mode at a given point of their spread (0.5 = the usual one), 0 = not known yet.
+int tapAt(int mode, double where) {
     if (mode < 0 || mode >= MODES) return 0;
     auto taps = g_taps[mode];
     if (taps.size() < 4) return 0;
-    std::nth_element(taps.begin(), taps.begin() + taps.size() / 2, taps.end());
-    return std::clamp(taps[taps.size() / 2], 1, 120);
+    std::sort(taps.begin(), taps.end());
+    size_t i = std::min(taps.size() - 1, static_cast<size_t>(std::lround(where * (taps.size() - 1))));
+    return std::clamp(taps[i], 1, 120);
 }
+int usualTap(int mode) { return tapAt(mode, 0.5); }
 
 // Times your real presses and releases (whatever the buffer does with them).
 void noteInput(PlayerObject* p1, bool down) {
@@ -198,7 +218,8 @@ struct Choice {
 };
 
 // Finds the delay for an input that would kill you as it is.
-Choice choose(PlayLayer* layer, ghost::Setup const& setup, bool down, bool wave, int horizon, int limit, int base) {
+Choice choose(PlayLayer* layer, ghost::Setup const& setup, bool down, bool wave, int horizon, int limit, int base,
+              int longTap) {
     auto const& cfg = config();
     bool smart = cfg.smartSafety && !setup.flying;
     bool dual = setup.p2 != nullptr;
@@ -314,11 +335,27 @@ Choice choose(PlayLayer* layer, ghost::Setup const& setup, bool down, bool wave,
         }
     }
 
-    // Confidence: only help when a hair later and slightly different steps agree.
-    // If they don't, try the next safe delays; if none holds up, leave the input alone.
-    if (cfg.confidence) {
-        // a quarter tick later has to work too, so the fix isn't sitting on a knife edge
-        auto sure = [&](double d) { return passes(d, ghost::run(layer, setup, d + 0.25, down, horizon)); };
+    // Confidence: a quarter tick later has to work too, so the fix isn't on a knife edge.
+    // Your longer taps: if you sometimes hold clearly longer, the fix has to work for
+    // those too. If a delay fails either, try the next safe ones; if none holds up,
+    // leave the input alone.
+    if (cfg.confidence || longTap > 0) {
+        char const* failed = nullptr;
+        auto verified = [&](double d) {
+            if (cfg.confidence && !passes(d, ghost::run(layer, setup, d + 0.25, down, horizon))) {
+                failed = "not sure (only works on a knife edge)";
+                return false;
+            }
+            if (longTap > 0) {
+                auto longer = setup;
+                longer.tapSteps = longTap;
+                if (!passes(d, ghost::run(layer, longer, d, down, horizon))) {
+                    failed = "wouldn't be safe with your longer taps";
+                    return false;
+                }
+            }
+            return true;
+        };
         std::vector<double> order { chosen };
         if (chosen != pick) order.push_back(pick);
         for (int d : best) {
@@ -331,14 +368,14 @@ Choice choose(PlayLayer* layer, ghost::Setup const& setup, bool down, bool wave,
         }
         bool found = false;
         for (double d : order) {
-            if (d <= dmax && sure(d)) {
+            if (d <= dmax && verified(d)) {
                 chosen = d;
                 found = true;
                 break;
             }
         }
-        if (!found) return Choice { .base = base, .why = "not sure (only works on a knife edge)" };
-        c.sure = true;
+        if (!found) return Choice { .base = base, .why = failed ? failed : "no safe delay within the limit" };
+        c.sure = cfg.confidence;
     }
 
     c.ok = true;
@@ -368,11 +405,85 @@ void report(PlayLayer* layer, PlayerObject* p1, Choice const& c, bool down, int 
 void firePending(PlayLayer* layer) {
     feed(layer, g_pending.down);
     g_pending.active = false;
+    if (g_check.armed) {
+        g_check.armed = false;
+        g_check.active = true;
+        g_check.sample = 0;
+    }
     if (g_held != g_pending.down) {
         // you changed the button during the wait: keep the tap as long as you made it
         int tap = std::max(1, g_pending.lastChange);
         g_flip = { true, g_held, tap };
     }
+}
+
+// Self-check: run the chosen delay once more and note where player 1 should be
+// for the first steps after the input (stopping where your own next input would
+// change the path anyway).
+void armCheck(PlayLayer* layer, ghost::Setup const& setup, double delay, bool down) {
+    g_check = {};
+    auto p1 = setup.p1;
+    g_check.holdMatters = p1->m_isRobot || p1->m_isDart || p1->m_isShip;
+    int length = 8;
+    if (down && p1->m_isRobot && setup.tapSteps > 0) length = std::min(length, setup.tapSteps);
+    if (length < 3) return;
+    auto record = setup;
+    record.record = &g_check.predicted;
+    record.recordMax = length;
+    auto r = ghost::run(layer, record, delay, down, length);
+    if (r.hitStop || g_check.predicted.size() < 3) {
+        g_check = {};
+        return;
+    }
+    auto info = ghost::lastRun();
+    g_check.tags[static_cast<int>(Feature::Finer)] = std::abs(delay - std::floor(delay + 1e-6)) > 0.01;
+    g_check.tags[static_cast<int>(Feature::Remainder)] = setup.remainder > 0.f;
+    g_check.tags[static_cast<int>(Feature::Moving)] = info.moved;
+    g_check.tags[static_cast<int>(Feature::Pads)] = info.pad;
+    g_check.tags[static_cast<int>(Feature::Orbs)] = info.orb;
+    g_check.armed = true;
+}
+
+void finishCheck(bool miss) {
+    g_check.armed = g_check.active = false;
+    g_checks++;
+    if (!miss) g_hits++;
+    if (miss) {
+        log::info("self-check: prediction missed by {:.2f} units after {} steps", g_check.worst, g_check.sample);
+    }
+    for (int f = 0; f < static_cast<int>(Feature::Count); ++f) {
+        if (!g_check.tags[f]) continue;
+        g_tagChecks[f]++;
+        if (miss) g_tagMisses[f]++;
+        // a feature whose predictions keep missing turns itself off until the game restarts
+        if (g_tagMisses[f] >= 3 && g_tagMisses[f] * 10 >= g_tagChecks[f] * 4) {
+            auto feature = static_cast<Feature>(f);
+            disableForSession(feature);
+            auto line = fmt::format("{} switched off for this session: its predictions missed {} of {} times",
+                featureName(feature), g_tagMisses[f], g_tagChecks[f]);
+            log::warn("{}", line);
+            window::note(line);
+            g_tagMisses[f] = 0;
+            g_tagChecks[f] = 0;
+        }
+    }
+    window::accuracy(g_checks, g_hits);
+}
+
+// Called at the start of every whole step: one more comparison.
+void stepCheck(PlayerObject* p1) {
+    if (!g_check.active || !p1) return;
+    if (g_check.sample >= g_check.predicted.size()) return finishCheck(g_check.worst > CHECK_TOLERANCE);
+    auto real = p1->getPosition();
+    auto want = g_check.predicted[g_check.sample++];
+    g_check.worst = std::max({ g_check.worst, std::abs(real.x - want.x), std::abs(real.y - want.y) });
+    if (g_check.worst > CHECK_TOLERANCE) return finishCheck(true);
+    if (g_check.sample >= g_check.predicted.size()) finishCheck(false);
+}
+
+// Your own input changed the path: the comparison can't continue.
+void dropCheck() {
+    g_check = {};
 }
 
 // Hold fix (wave, and ship when it's on): you're holding and holding on kills you
@@ -434,6 +545,8 @@ bool take(PlayLayer* layer, bool down, bool isPlayer1) {
     };
 
     noteInput(layer->m_player1, down);
+    // a new click (or a release where holding matters) changes the path: stop comparing
+    if (g_check.active && (down || g_check.holdMatters)) dropCheck();
 
     // Hold fix already let go for you: this is your own release arriving.
     if (g_autoReleased) {
@@ -460,6 +573,7 @@ bool take(PlayLayer* layer, bool down, bool isPlayer1) {
     // Something is already held back: this is part of the same tap.
     if (g_pending.active) {
         g_pending.lastChange = g_pending.elapsed;
+        if (g_check.holdMatters || down) dropCheck(); // you changed the button before it even fired
         g_sinceInput = 0;
         return true;
     }
@@ -503,19 +617,24 @@ bool take(PlayLayer* layer, bool down, bool isPlayer1) {
     setup.fresh = cfg.freshGhost;
     // Click Between Frames hands GD your click partway through a step: the rest of
     // that step still runs before any whole step does
-    if (cfg.steadyTiming && g_phase > 0.f && g_fullDt > 0.f && g_phase < 0.9f * g_fullDt) {
+    if (cfg.steadyTiming && cfg.remainderModel && g_phase > 0.f && g_fullDt > 0.f && g_phase < 0.9f * g_fullDt) {
         setup.remainder = 1.f - g_phase / g_fullDt;
     }
-    // a press: the ghost lets go when you usually do (cube-like modes)
+    // a press: the ghost lets go when you usually do (cube-like modes), checked with
+    // your shorter taps and, if they're clearly different, your longer ones too
+    int longTap = 0;
     if (down && cfg.tapModel && tapMode(modeOf(p1)) && (!p2 || tapMode(modeOf(p2)))) {
-        setup.tapSteps = usualTap(modeOf(p1));
+        int shortTap = tapAt(modeOf(p1), 0.25);
+        int longerTap = tapAt(modeOf(p1), 0.75);
+        setup.tapSteps = shortTap;
+        if (shortTap > 0 && longerTap > shortTap + 1) longTap = longerTap;
     }
 
     auto now = ghost::run(layer, setup, ghost::NOW, down, horizon);
     // fine as it is, or something ahead the ghost can't judge (an orb, a mode portal)
     if (now.hitStop || now.survived >= horizon) return pass();
 
-    auto c = choose(layer, setup, down, wave, horizon, limit, now.survived);
+    auto c = choose(layer, setup, down, wave, horizon, limit, now.survived, longTap);
     if (!c.ok) {
         auto line = fmt::format("{}% {} would hit something: let through ({}, limit {})", percentOf(layer),
             down ? "click" : "release", c.why, limit);
@@ -531,6 +650,7 @@ bool take(PlayLayer* layer, bool down, bool isPlayer1) {
     g_pending.frac = static_cast<float>(c.delay - g_pending.stepsLeft);
     if (g_pending.frac < 0.01f) g_pending.frac = 0.f;
     report(layer, p1, c, down, limit);
+    if (cfg.selfCheck) armCheck(layer, setup, c.delay, down);
     return true;
 }
 
@@ -562,6 +682,7 @@ float beforeStep(PlayLayer* layer, float dt) {
     if (counts) {
         g_step++;
         if (g_sinceInput < 999) g_sinceInput++;
+        stepCheck(layer->m_player1);
     }
     if (!cfg.enabled) return 0.f;
 
@@ -638,6 +759,8 @@ double clock() {
 }
 
 void died(PlayLayer* layer) {
+    if (g_check.active) finishCheck(true);
+    g_check = {};
     auto const& cfg = config();
     if (!cfg.deathCheck || !g_lastHelp.active) return;
     long long since = g_step - g_lastHelp.step;
@@ -681,6 +804,7 @@ void levelEnded() {
 
 void reset() {
     cancel();
+    g_check = {};
     g_fed = false;
     g_burst = 0;
     g_phase = 0.f;

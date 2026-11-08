@@ -30,6 +30,8 @@ struct Config {
     bool throughPads = true;   // ghost uses pads, speed and gravity portals instead of stopping
     bool throughOrbs = true;   // ghost uses yellow / pink / red / blue / green / black orbs
     bool tapModel = true;      // ghost lets go after your usual tap instead of holding
+    bool selfCheck = true;     // compare predictions with what really happens
+    bool remainderModel = true; // (no setting) the rest of a Click Between Frames split step
     bool freshGhost = true;
     bool stopAtPortals = true;
     bool smartSafety = true;
@@ -46,6 +48,11 @@ Config const& config();
 
 // Re-reads every setting.
 void loadConfig();
+
+// The self-check found a feature's predictions keep missing: off until the game restarts.
+enum class Feature { Finer, Remainder, Moving, Pads, Orbs, Count };
+void disableForSession(Feature feature);
+char const* featureName(Feature feature);
 
 // Toggle key: cycles 2 -> 4 -> 8 -> 16 ticks -> off and saves it to the
 // settings. Returns a short line describing the new stage.

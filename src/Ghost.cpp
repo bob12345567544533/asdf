@@ -24,6 +24,7 @@ bool g_stopped = false;
 bool g_held[2] { false, false };
 bool g_ready[2] { false, false }; // pressed since the last orb it used (a click an orb can still take)
 std::vector<GameObject*> g_used; // pads / portals the ghost already used this run
+RunInfo g_info;
 
 // How hard GD bumps the player for each pad type, learned from the real player
 // (so the ghost bumps exactly like the game does). Saved between sessions.
@@ -218,6 +219,7 @@ struct RunGuard {
         g_held[0] = g_held[1] = false;
         g_ready[0] = g_ready[1] = false;
         g_used.clear();
+        g_info = {};
     }
     ~RunGuard() { g_running = false; }
 };
@@ -268,6 +270,7 @@ Result run(PlayLayer* layer, Setup const& s, double delay, bool down, int horizo
 
     RunGuard guard;
     Movers movers(config().movingObjects, s.dt);
+    g_info.moved = movers.any();
     for (int i = 0; i < count; ++i) {
         if (s.fresh) freshen(g_ghost[i]);
         mirror(g_ghost[i], real[i]);
@@ -290,6 +293,7 @@ Result run(PlayLayer* layer, Setup const& s, double delay, bool down, int horizo
     int sincePress = 0;
     auto afterInputStep = [&]() -> bool { // true = the run is over
         result.survived++;
+        if (s.record && static_cast<int>(s.record->size()) < s.recordMax) s.record->push_back(g_ghost[0]->getPosition());
         // your usual tap: let go when you normally would
         if (down && s.tapSteps > 0 && ++sincePress == s.tapSteps) {
             for (int i = 0; i < count; ++i) press(i, false);
@@ -407,6 +411,8 @@ void splitCollide(PlayLayer* layer, PlayerObject* p, bool startedOnGround, float
 
 bool running() { return g_running; }
 
+RunInfo lastRun() { return g_info; }
+
 bool isGhost(PlayerObject* player) {
     return player && (player == g_ghost[0] || player == g_ghost[1]);
 }
@@ -428,6 +434,7 @@ bool usePad(PlayerObject* ghost, GameObject* pad) {
     auto it = g_bump.find(static_cast<int>(pad->m_objectType));
     if (it == g_bump.end()) return false; // never seen GD use this pad type yet
     g_used.push_back(pad);
+    g_info.pad = true;
     ghost->bumpPlayer(it->second, static_cast<int>(pad->m_objectType), true, pad);
     return true;
 }
@@ -435,6 +442,7 @@ bool usePad(PlayerObject* ghost, GameObject* pad) {
 bool useSpeedPortal(PlayerObject* ghost, GameObject* portal, float speed) {
     if (used(portal)) return true;
     g_used.push_back(portal);
+    g_info.pad = true;
     ghost->m_playerSpeed = speed;
     return true;
 }
@@ -442,6 +450,7 @@ bool useSpeedPortal(PlayerObject* ghost, GameObject* portal, float speed) {
 bool useGravityPortal(PlayerObject* ghost, GameObject* portal) {
     if (used(portal)) return true;
     g_used.push_back(portal);
+    g_info.pad = true;
     bool flip = ghost->m_isUpsideDown;
     switch (portal->m_objectType) {
         case GameObjectType::InverseGravityPortal: flip = true; break;
@@ -462,6 +471,7 @@ OrbUse useOrb(PlayerObject* ghost, GameObject* orb) {
     auto effect = findOrb(orbKey(orb, ghost, ghost->m_isUpsideDown));
     if (!effect) return OrbUse::Unsupported; // never seen this orb in this mode yet
     g_used.push_back(orb);
+    g_info.orb = true;
     g_ready[i] = false;
     if (effect->flips) ghost->flipGravity(!ghost->m_isUpsideDown, true);
     ghost->m_yVelocity = effect->velocity;

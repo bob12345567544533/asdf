@@ -3,7 +3,7 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v2.3.0",
+	"version": "v2.4.0",
 	"id": "ai.predictivebuffer",
 	"name": "Predictive Input Buffer",
 	"developer": "lilWC",
@@ -255,7 +255,13 @@
 			"type": "bool",
 			"name": "Learn Your Taps",
 			"default": true,
-			"description": "Learns how long you usually hold a click in each mode (not wave / ship) and has the ghost let go then, instead of holding for the whole check."
+			"description": "Learns how long you hold your clicks in each mode (not wave / ship). The ghost lets go after your shorter taps, and if you sometimes hold clearly longer, a fix also has to work with those."
+		},
+		"self-check": {
+			"type": "bool",
+			"name": "Self-Check",
+			"default": true,
+			"description": "After each held-back input, compares where the ghost said you'd be with where you really are. The window shows the accuracy, and a feature whose predictions keep missing turns itself off until you restart the game."
 		},
 		"fresh-ghost": {
 			"type": "bool",

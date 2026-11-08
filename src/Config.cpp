@@ -8,6 +8,15 @@ namespace pb {
 
 namespace {
 Config g_config;
+bool g_off[static_cast<int>(Feature::Count)] {};
+
+void applyOverrides(Config& c) {
+    if (g_off[static_cast<int>(Feature::Finer)]) c.finerTiming = false;
+    if (g_off[static_cast<int>(Feature::Remainder)]) c.remainderModel = false;
+    if (g_off[static_cast<int>(Feature::Moving)]) c.movingObjects = false;
+    if (g_off[static_cast<int>(Feature::Pads)]) c.throughPads = false;
+    if (g_off[static_cast<int>(Feature::Orbs)]) c.throughOrbs = false;
+}
 
 constexpr char const* MODE_KEYS[MODES] { "max-cube", "max-ship", "max-ball", "max-ufo", "max-wave", "max-robot",
                                          "max-spider", "max-swing" };
@@ -39,11 +48,29 @@ void loadConfig() {
     c.throughPads = flag("through-pads");
     c.throughOrbs = flag("through-orbs");
     c.tapModel = flag("tap-model");
+    c.selfCheck = flag("self-check");
     c.freshGhost = flag("fresh-ghost");
     c.stopAtPortals = flag("stop-at-portals");
     c.smartSafety = flag("smart-safety");
     c.steadyTiming = flag("steady-timing");
+    applyOverrides(c);
     g_config = c;
+}
+
+void disableForSession(Feature feature) {
+    g_off[static_cast<int>(feature)] = true;
+    applyOverrides(g_config);
+}
+
+char const* featureName(Feature feature) {
+    switch (feature) {
+        case Feature::Finer: return "Finer Timing";
+        case Feature::Remainder: return "mid-step clicks (Click Between Frames)";
+        case Feature::Moving: return "See Moving Objects";
+        case Feature::Pads: return "Use Pads And Portals";
+        case Feature::Orbs: return "Use Orbs";
+        default: return "?";
+    }
 }
 
 std::string cycleStage() {

@@ -136,7 +136,7 @@ struct Attempt {
 };
 
 struct Event {
-    enum Type { Note, Saved, NewAttempt, Death } type = Note;
+    enum Type { Note, Saved, NewAttempt, Death, Accuracy } type = Note;
     Item item;
     int number = 0;
     bool newLevel = false;
@@ -155,6 +155,8 @@ Values g_values;
 std::deque<Attempt> g_attempts; // newest first
 int g_levelSaves = 0;
 double g_levelMs = 0.0;
+int g_checks = 0; // self-check: predictions compared this session
+int g_hits = 0;   // ... and how many were right
 int g_hover = -1;
 int g_dragging = -1;
 int g_focus = 0; // slider the arrow keys change
@@ -494,18 +496,20 @@ void paintStats(gp::Graphics& g) {
         attemptSaves = g_attempts.front().saves;
         attemptNumber = g_attempts.front().number;
     }
-    std::wstring values[3] {
+    std::wstring values[4] {
         std::to_wstring(attemptSaves),
         std::to_wstring(g_levelSaves),
         g_levelSaves > 0 ? fmtw(L"%.1f", g_levelMs / g_levelSaves) : std::wstring(L"–"),
+        g_checks > 0 ? fmtw(L"%d%%", static_cast<int>(std::lround(100.0 * g_hits / g_checks))) : std::wstring(L"–"),
     };
-    std::wstring labels[3] {
+    std::wstring labels[4] {
         attemptNumber > 0 ? fmtw(L"ATTEMPT %d", attemptNumber) : std::wstring(L"ATTEMPT"),
         L"THIS LEVEL",
         L"AVG MS EARLY",
+        g_checks > 0 ? fmtw(L"ACCURACY · %d", g_checks) : std::wstring(L"ACCURACY"),
     };
-    float colW = (W - 2 * PAD) / 3.f;
-    for (int i = 0; i < 3; ++i) {
+    float colW = (W - 2 * PAD) / 4.f;
+    for (int i = 0; i < 4; ++i) {
         float x = PAD + i * colW;
         text(g, values[i], Face::Light, 22.f, col(C_TEXT), box(x, STATS_Y + 6.f, colW, 28.f));
         spaced(g, labels[i], Face::Ui, 9.5f, col(C_FAINT), box(x, STATS_Y + 34.f, colW, 18.f), 1.3f);
@@ -736,6 +740,10 @@ void handleEvent(Event& e) {
             break;
         case Event::Note:
             addItem(std::move(e.item));
+            break;
+        case Event::Accuracy:
+            g_checks = e.number;
+            g_hits = static_cast<int>(e.item.save.ticks);
             break;
     }
 }
@@ -1254,6 +1262,15 @@ void death(int percent) {
     post(e);
 }
 
+void accuracy(int checks, int hits) {
+    if (!g_window.load()) return;
+    auto e = new Event;
+    e->type = Event::Accuracy;
+    e->number = checks;
+    e->item.save.ticks = hits;
+    post(e);
+}
+
 } // namespace pb::window
 
 #else
@@ -1268,6 +1285,7 @@ void note(std::string const&) {}
 void saved(Save const&) {}
 void attempt(int, bool) {}
 void death(int) {}
+void accuracy(int, int) {}
 
 } // namespace pb::window
 
