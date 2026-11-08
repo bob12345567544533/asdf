@@ -22,12 +22,64 @@ bool g_running = false;
 bool g_dead = false;
 bool g_stopped = false;
 bool g_held[2] { false, false };
+bool g_ready[2] { false, false }; // pressed since the last orb it used (a click an orb can still take)
 std::vector<GameObject*> g_used; // pads / portals the ghost already used this run
 
 // How hard GD bumps the player for each pad type, learned from the real player
 // (so the ghost bumps exactly like the game does). Saved between sessions.
 std::unordered_map<int, float> g_bump;
 bool g_bumpLoaded = false;
+
+// What each orb does to the player, learned from the real player: the velocity it
+// leaves you with and whether it flips gravity, per orb type / mode / size / gravity.
+struct OrbEffect {
+    double velocity = 0.0;
+    bool flips = false;
+};
+std::unordered_map<std::string, OrbEffect> g_orbs;
+
+int modeKey(PlayerObject* p) {
+    if (p->m_isShip) return 1;
+    if (p->m_isBall) return 2;
+    if (p->m_isBird) return 3;
+    if (p->m_isDart) return 4;
+    if (p->m_isRobot) return 5;
+    if (p->m_isSpider) return 6;
+    if (p->m_isSwing) return 7;
+    return 0;
+}
+
+std::string orbKey(GameObject* orb, PlayerObject* p, bool upsideDown) {
+    return fmt::format("orb-{}-{}-{}-{}", static_cast<int>(orb->m_objectType), modeKey(p), p->m_vehicleSize < 1.f ? 1 : 0,
+                       upsideDown ? 1 : 0);
+}
+
+bool supportedOrb(GameObject* orb) {
+    switch (orb->m_objectType) {
+        case GameObjectType::YellowJumpRing:
+        case GameObjectType::PinkJumpRing:
+        case GameObjectType::RedJumpRing:
+        case GameObjectType::GravityRing:
+        case GameObjectType::GreenRing:
+        case GameObjectType::DropRing:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Learned orbs are saved as plain values ("<key>-v" velocity, "<key>-f" flips),
+// looked up the first time an orb type / mode comes up.
+OrbEffect const* findOrb(std::string const& key) {
+    auto it = g_orbs.find(key);
+    if (it != g_orbs.end()) return &it->second;
+    auto mod = Mod::get();
+    if (!mod->hasSavedValue(key + "-v")) return nullptr;
+    OrbEffect e;
+    e.velocity = mod->getSavedValue<double>(key + "-v");
+    e.flips = mod->getSavedValue<bool>(key + "-f");
+    return &(g_orbs[key] = e);
+}
 
 // Objects around the player and how fast they move (units per unit of step time).
 struct Track {
@@ -64,6 +116,7 @@ void mirror(PlayerObject* ghost, PlayerObject* real) {
 void press(int i, bool down) {
     if (down) g_ghost[i]->pushButton(PlayerButton::Jump);
     else g_ghost[i]->releaseButton(PlayerButton::Jump);
+    if (down && !g_held[i]) g_ready[i] = true;
     g_held[i] = down;
 }
 
@@ -163,6 +216,7 @@ struct RunGuard {
         g_dead = false;
         g_stopped = false;
         g_held[0] = g_held[1] = false;
+        g_ready[0] = g_ready[1] = false;
         g_used.clear();
     }
     ~RunGuard() { g_running = false; }
@@ -227,8 +281,13 @@ Result run(PlayLayer* layer, Setup const& s, double delay, bool down, int horizo
     int grounded[2] {};
     int airborne[2] {};
     bool clear[2] {};
+    int sincePress = 0;
     auto afterInputStep = [&]() -> bool { // true = the run is over
         result.survived++;
+        // your usual tap: let go when you normally would
+        if (down && s.tapSteps > 0 && ++sincePress == s.tapSteps) {
+            for (int i = 0; i < count; ++i) press(i, false);
+        }
         if (result.survived >= horizon) return true;
         if (s.flying) return false;
         bool allClear = true;
@@ -386,6 +445,34 @@ bool useGravityPortal(PlayerObject* ghost, GameObject* portal) {
     }
     if (flip != ghost->m_isUpsideDown) ghost->flipGravity(flip, true);
     return true;
+}
+
+OrbUse useOrb(PlayerObject* ghost, GameObject* orb) {
+    if (!supportedOrb(orb)) return OrbUse::Unsupported;
+    int i = ghost == g_ghost[1] ? 1 : 0;
+    if (used(orb)) return OrbUse::Ignored;
+    if (!g_held[i]) return OrbUse::Ignored;      // no click, no orb
+    if (!g_ready[i]) return OrbUse::Unsupported; // held from before the check: can't tell if GD would use it
+    auto effect = findOrb(orbKey(orb, ghost, ghost->m_isUpsideDown));
+    if (!effect) return OrbUse::Unsupported; // never seen this orb in this mode yet
+    g_used.push_back(orb);
+    g_ready[i] = false;
+    if (effect->flips) ghost->flipGravity(!ghost->m_isUpsideDown, true);
+    ghost->m_yVelocity = effect->velocity;
+    ghost->m_isOnGround = false;
+    return OrbUse::Used;
+}
+
+void learnOrb(PlayerObject* p, GameObject* orb, double velocityBefore, bool flippedBefore) {
+    if (!p || !orb || !supportedOrb(orb)) return;
+    bool flips = p->m_isUpsideDown != flippedBefore;
+    if (!flips && std::abs(p->m_yVelocity - velocityBefore) < 1e-6) return; // GD didn't use it after all
+    auto key = orbKey(orb, p, flippedBefore);
+    auto known = findOrb(key);
+    if (known && std::abs(known->velocity - p->m_yVelocity) < 1e-6 && known->flips == flips) return;
+    g_orbs[key] = { p->m_yVelocity, flips };
+    Mod::get()->setSavedValue<double>(key + "-v", p->m_yVelocity);
+    Mod::get()->setSavedValue<bool>(key + "-f", flips);
 }
 
 void learnBump(int objectType, float bumpMod) {

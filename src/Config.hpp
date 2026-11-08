@@ -28,6 +28,8 @@ struct Config {
     bool movingObjects = true; // ghost sees objects that are moving
     bool holdFix = true;       // wave / ship: let go for you when holding on would kill you
     bool throughPads = true;   // ghost uses pads, speed and gravity portals instead of stopping
+    bool throughOrbs = true;   // ghost uses yellow / pink / red / blue / green / black orbs
+    bool tapModel = true;      // ghost lets go after your usual tap instead of holding
     bool freshGhost = true;
     bool stopAtPortals = true;
     bool smartSafety = true;

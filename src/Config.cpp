@@ -37,6 +37,8 @@ void loadConfig() {
     c.movingObjects = flag("moving-objects");
     c.holdFix = flag("hold-fix");
     c.throughPads = flag("through-pads");
+    c.throughOrbs = flag("through-orbs");
+    c.tapModel = flag("tap-model");
     c.freshGhost = flag("fresh-ghost");
     c.stopAtPortals = flag("stop-at-portals");
     c.smartSafety = flag("smart-safety");

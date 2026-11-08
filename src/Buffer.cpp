@@ -68,6 +68,61 @@ bool g_completes = true;   // this update call finishes its step
 int g_attempt = -1;
 PlayLayer* g_layer = nullptr;
 
+int modeOf(PlayerObject* p);
+
+// Your taps (steps from press to release) per mode, newest last, and the press being timed.
+std::vector<int> g_taps[MODES];
+long long g_pressAt = -1;
+int g_pressMode = CUBE;
+bool g_tapsLoaded = false;
+
+bool tapMode(int mode) { return mode != WAVE && mode != SHIP; } // hold length varies too much there
+
+void loadTaps() {
+    if (g_tapsLoaded) return;
+    g_tapsLoaded = true;
+    auto mod = Mod::get();
+    for (int m = 0; m < MODES; ++m) {
+        auto key = fmt::format("tap-{}", m);
+        if (!mod->hasSavedValue(key)) continue;
+        int tap = static_cast<int>(mod->getSavedValue<int64_t>(key));
+        if (tap > 0) g_taps[m].assign(4, tap); // last session's usual tap to start from
+    }
+}
+
+// Your usual tap in a mode (median of the recent ones), 0 = not known yet.
+int usualTap(int mode) {
+    if (mode < 0 || mode >= MODES) return 0;
+    auto taps = g_taps[mode];
+    if (taps.size() < 4) return 0;
+    std::nth_element(taps.begin(), taps.begin() + taps.size() / 2, taps.end());
+    return std::clamp(taps[taps.size() / 2], 1, 120);
+}
+
+// Times your real presses and releases (whatever the buffer does with them).
+void noteInput(PlayerObject* p1, bool down) {
+    if (!p1) return;
+    if (down) {
+        g_pressAt = g_step;
+        g_pressMode = modeOf(p1);
+        return;
+    }
+    if (g_pressAt < 0) return;
+    int tap = static_cast<int>(g_step - g_pressAt);
+    g_pressAt = -1;
+    if (tap < 1 || tap > 120 || !tapMode(g_pressMode)) return;
+    auto& taps = g_taps[g_pressMode];
+    taps.push_back(tap);
+    if (taps.size() > 16) taps.erase(taps.begin());
+}
+
+void saveTaps() {
+    auto mod = Mod::get();
+    for (int m = 0; m < MODES; ++m) {
+        if (int tap = usualTap(m)) mod->setSavedValue<int64_t>(fmt::format("tap-{}", m), tap);
+    }
+}
+
 std::mt19937& rng() {
     static std::mt19937 gen { std::random_device {}() };
     return gen;
@@ -376,6 +431,8 @@ bool take(PlayLayer* layer, bool down, bool isPlayer1) {
         return false;
     };
 
+    noteInput(layer->m_player1, down);
+
     // Hold fix already let go for you: this is your own release arriving.
     if (g_autoReleased) {
         g_autoReleased = false;
@@ -447,6 +504,10 @@ bool take(PlayLayer* layer, bool down, bool isPlayer1) {
     if (cfg.steadyTiming && g_phase > 0.f && g_fullDt > 0.f && g_phase < 0.9f * g_fullDt) {
         setup.remainder = 1.f - g_phase / g_fullDt;
     }
+    // a press: the ghost lets go when you usually do (cube-like modes)
+    if (down && cfg.tapModel && tapMode(modeOf(p1)) && (!p2 || tapMode(modeOf(p2)))) {
+        setup.tapSteps = usualTap(modeOf(p1));
+    }
 
     auto now = ghost::run(layer, setup, ghost::NOW, down, horizon);
     // fine as it is, or something ahead the ghost can't judge (an orb, a mode portal)
@@ -482,11 +543,8 @@ float beforeStep(PlayLayer* layer, float dt) {
     g_recent[g_recentAt] = dt;
     g_recentAt = (g_recentAt + 1) % 16;
     g_fullDt = *std::max_element(std::begin(g_recent), std::end(g_recent));
-    g_step++;
 
     auto const& cfg = config();
-    if (!cfg.enabled) return 0.f;
-    if (g_sinceInput < 999) g_sinceInput++;
 
     // Steady timing: Click Between Frames runs a step in parts. Only the call that
     // starts a step counts (and fires inputs), so waits are whole steps long.
@@ -499,6 +557,11 @@ float beforeStep(PlayLayer* layer, float dt) {
         g_phase = 0.f;
         g_completes = true;
     }
+    if (counts) {
+        g_step++;
+        if (g_sinceInput < 999) g_sinceInput++;
+    }
+    if (!cfg.enabled) return 0.f;
 
     auto p1 = layer->m_player1;
     auto p2 = layer->m_gameState.m_isDualMode ? layer->m_player2 : nullptr;
@@ -589,6 +652,8 @@ void died(PlayLayer* layer) {
 
 void levelStarted(PlayLayer* layer) {
     g_layer = layer;
+    loadTaps();
+    g_pressAt = -1;
     ghost::create(layer);
     cancel();
     g_held = false;
@@ -604,6 +669,7 @@ void levelStarted(PlayLayer* layer) {
 }
 
 void levelEnded() {
+    saveTaps();
     ghost::destroy();
     cancel();
     g_feeding = false;

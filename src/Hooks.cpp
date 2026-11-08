@@ -141,6 +141,18 @@ Use useObject(GameObject* obj, PlayerObject* ghost) {
             }
             return ok ? Use::Used : Use::Unsupported;
         }
+        case GameObjectType::YellowJumpRing:
+        case GameObjectType::PinkJumpRing:
+        case GameObjectType::RedJumpRing:
+        case GameObjectType::GravityRing:
+        case GameObjectType::GreenRing:
+        case GameObjectType::DropRing:
+            if (!pb::config().throughOrbs) return Use::Unsupported;
+            switch (pb::ghost::useOrb(ghost, obj)) {
+                case pb::ghost::OrbUse::Used: return Use::Used;
+                case pb::ghost::OrbUse::Ignored: return Use::Ignored;
+                default: return Use::Unsupported;
+            }
         default:
             return Use::Unsupported;
     }
@@ -333,7 +345,13 @@ class $modify(PlayerObject) {
 
     void ringJump(RingObject* ring, bool skipCheck) {
         if (pb::ghost::running()) return;
+        auto layer = PlayLayer::get();
+        bool real = layer && (this == layer->m_player1 || this == layer->m_player2);
+        double velocity = m_yVelocity;
+        bool flipped = m_isUpsideDown;
         PlayerObject::ringJump(ring, skipCheck);
+        // the real player used an orb: the ghost uses that orb type the same way
+        if (real) pb::ghost::learnOrb(this, ring, velocity, flipped);
     }
 
     void playSpiderDashEffect(CCPoint from, CCPoint to) {

@@ -21,6 +21,9 @@ struct Setup {
     // Part of the current step still to run when the input arrived (0..1). Click
     // Between Frames splits a step at your click, so it can arrive mid-step.
     float remainder = 0.f;
+    // For a press: let go this many steps after it (your usual tap in this mode).
+    // 0 = keep holding for the whole check.
+    int tapSteps = 0;
 };
 
 struct Result {
@@ -62,6 +65,14 @@ bool useSpeedPortal(PlayerObject* ghost, GameObject* portal, float speed);
 bool useGravityPortal(PlayerObject* ghost, GameObject* portal);
 // The real player used a pad: remember how hard GD bumps for that pad type.
 void learnBump(int objectType, float bumpMod);
+
+// Orbs (yellow, pink, red, blue, green, black): the ghost uses one when it touches
+// it holding a click it hasn't used yet, the way the real player did with that orb
+// type in the same mode / size / gravity. Returns false when it can't (yet).
+enum class OrbUse { Used, Ignored, Unsupported };
+OrbUse useOrb(PlayerObject* ghost, GameObject* orb);
+// The real player used an orb: `before` / `after` its velocity and gravity.
+void learnOrb(PlayerObject* player, GameObject* orb, double velocityBefore, bool flippedBefore);
 
 // Moving objects: the real collision checks report the objects around the
 // player each step; the ghost moves the ones that are moving along with it.

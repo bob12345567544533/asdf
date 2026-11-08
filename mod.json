@@ -3,7 +3,7 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v2.2.1",
+	"version": "v2.3.0",
 	"id": "ai.predictivebuffer",
 	"name": "Predictive Input Buffer",
 	"developer": "lilWC",
@@ -245,6 +245,18 @@
 			"default": true,
 			"description": "The ghost uses yellow / pink / red pads, speed portals and gravity portals itself, so the buffer still helps near them. Pads start working once you've hit that pad type once."
 		},
+		"through-orbs": {
+			"type": "bool",
+			"name": "Use Orbs",
+			"default": true,
+			"description": "The ghost uses yellow, pink, red, blue, green and black orbs itself (when it's holding a fresh click), copying what the game did when you hit that orb type in the same mode, size and gravity. Each one starts working after you've hit it once."
+		},
+		"tap-model": {
+			"type": "bool",
+			"name": "Learn Your Taps",
+			"default": true,
+			"description": "Learns how long you usually hold a click in each mode (not wave / ship) and has the ghost let go then, instead of holding for the whole check."
+		},
 		"fresh-ghost": {
 			"type": "bool",
 			"name": "Fresh Ghost",
@@ -254,7 +266,7 @@
 		"stop-at-portals": {
 			"type": "bool",
 			"name": "Stop At Orbs / Mode Portals",
-			"description": "Things the ghost can't use itself (orbs, mode / size / dual / mirror / teleport portals) end a check as unknown, so your input goes through untouched.",
+			"description": "Things the ghost can't use itself (dash / spider / teleport / custom orbs, mode / size / dual / mirror / teleport portals, and orbs it hasn't learned yet) end a check as unknown, so your input goes through untouched.",
 			"default": true
 		},
 		"smart-safety": {
