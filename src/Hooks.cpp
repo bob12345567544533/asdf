@@ -295,6 +295,8 @@ class $modify(PlayerObject) {
         (void)self.setHookPriority("PlayerObject::incrementJumps", FIRST);
         (void)self.setHookPriority("PlayerObject::ringJump", FIRST);
         (void)self.setHookPriority("PlayerObject::playBumpEffect", FIRST);
+        // inside Click Between Frames' own update hook, so this sees each part of a step it splits
+        (void)self.setHookPriority("PlayerObject::update", Priority::VeryLate);
     }
 
     void update(float dt) {
@@ -303,8 +305,11 @@ class $modify(PlayerObject) {
         if (!layer || this != layer->m_player1) return PlayerObject::update(dt);
         float split = pb::buffer::beforeStep(layer, dt);
         if (split > 0.f && split < 1.f) {
-            // finer timing: the held-back input lands `split` of the way into this step
+            // finer timing: the held-back input lands `split` of the way into this step,
+            // split exactly like Click Between Frames splits a step (and like the ghost does)
+            bool startedOnGround = m_isOnGround;
             PlayerObject::update(dt * split);
+            pb::ghost::splitCollide(layer, this, startedOnGround, dt);
             pb::buffer::fireSplit(layer);
             PlayerObject::update(dt * (1.f - split));
         }

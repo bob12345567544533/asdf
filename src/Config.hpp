@@ -22,7 +22,7 @@ struct Config {
     bool practiceOnly = false;
     bool deathCheck = true; // say so when you die right after a held-back input
     // how inputs are judged and fired (each can be switched off)
-    bool finerTiming = false;  // delays in quarter ticks, fired inside a physics step (experimental)
+    bool finerTiming = true;   // delays in quarter ticks, fired inside a physics step
     bool bestFix = true;       // compare the safe delays and take the one that lives longest
     bool confidence = true;    // only help when slightly different runs agree
     bool movingObjects = true; // ghost sees objects that are moving

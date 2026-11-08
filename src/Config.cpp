@@ -31,7 +31,7 @@ void loadConfig() {
     c.popup = flag("show-feedback");
     c.practiceOnly = flag("practice-only");
     c.deathCheck = flag("death-check");
-    c.finerTiming = flag("finer-timing-v2");
+    c.finerTiming = flag("finer-timing-v3");
     c.bestFix = flag("best-fix");
     c.confidence = flag("confidence-check");
     c.movingObjects = flag("moving-objects");

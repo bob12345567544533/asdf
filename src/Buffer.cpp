@@ -63,7 +63,8 @@ float g_dt = 0.25f;        // last real step, time warp taken out
 float g_recent[16] {};     // recent step sizes
 int g_recentAt = 0;
 float g_fullDt = 0.25f;    // largest recent step (a Click Between Frames split step is smaller)
-float g_accum = 0.f;       // split steps adding up to a full one
+float g_phase = 0.f;       // how much of the current step has run (Click Between Frames splits steps)
+bool g_completes = true;   // this update call finishes its step
 int g_attempt = -1;
 PlayLayer* g_layer = nullptr;
 
@@ -129,7 +130,9 @@ std::string tickText(double ticks) {
 }
 
 struct Choice {
-    double delay = 0.0; // 0 = nothing safe, let the input through
+    bool ok = false;    // false = nothing safe, let the input through
+    double delay = 0.0; // whole steps after the rest of the current step (+ a fraction)
+    float remainder = 0.f; // the rest of the current step (part of the real delay)
     int base = 0;       // steps survived with no delay
     int result = 0;     // steps survived with the chosen delay
     bool random = false;
@@ -150,8 +153,9 @@ Choice choose(PlayLayer* layer, ghost::Setup const& setup, bool down, bool wave,
     auto loose = [&](double d, ghost::Result const& r) {
         if (r.hitStop) return r.survived > 0 && r.survived >= base;
         if (wave) {
-            int need = base + 10 + static_cast<int>(std::ceil(2 * (d - 1)));
-            int gain = 6 + static_cast<int>(std::ceil(2 * (d - 1)));
+            double wait = std::max(1.0, d + setup.remainder);
+            int need = base + 10 + static_cast<int>(std::ceil(2 * (wait - 1)));
+            int gain = 6 + static_cast<int>(std::ceil(2 * (wait - 1)));
             return r.survived < horizon ? r.survived >= need : (r.survived - base >= gain || r.survived >= need);
         }
         return r.survived >= std::min(base + 12, horizon);
@@ -167,28 +171,34 @@ Choice choose(PlayLayer* layer, ghost::Setup const& setup, bool down, bool wave,
     bool looseOk[MAX_TICKS + 1] {};
     bool tested[MAX_TICKS + 1] {};
     int survived[MAX_TICKS + 1] {};
-    int firstStrict = 0;
-    int firstLoose = 0;
+    int firstStrict = -1;
+    int firstLoose = -1;
     int window = std::max(cfg.randomize, cfg.bestFix ? 2 : 0);
-    for (int d = 1; d <= limit; ++d) {
+    // The real delay is the rest of the current step plus `d` whole steps. Mid-step
+    // (Click Between Frames), firing right after the rest of this step is already a delay.
+    float rem = setup.remainder;
+    int dmin = rem > 0.f ? 0 : 1;
+    int dmax = std::clamp(static_cast<int>(std::floor(limit - rem + 1e-6)), 0, MAX_TICKS);
+    for (int d = dmin; d <= dmax; ++d) {
         auto r = ghost::run(layer, setup, d, down, horizon);
         if (r.diedBeforeInput) break; // waiting any longer only dies sooner
         tested[d] = true;
         survived[d] = r.survived;
         strictOk[d] = strict(d, r);
         looseOk[d] = loose(d, r);
-        if (strictOk[d] && !firstStrict) firstStrict = d;
-        if (looseOk[d] && !firstLoose) firstLoose = d;
+        if (strictOk[d] && firstStrict < 0) firstStrict = d;
+        if (looseOk[d] && firstLoose < 0) firstLoose = d;
         // with a safe delay found, only a few ticks above it still matter
-        if (firstStrict && d >= firstStrict + window) break;
+        if (firstStrict >= 0 && d >= firstStrict + window) break;
     }
 
     Choice c;
     c.base = base;
-    bool useStrict = firstStrict != 0;
+    c.remainder = rem;
+    bool useStrict = firstStrict >= 0;
     bool* pool = useStrict ? strictOk : looseOk;
     int first = useStrict ? firstStrict : firstLoose;
-    if (!first) return c;
+    if (first < 0) return c;
     c.loose = !useStrict;
     auto passes = [&](double d, ghost::Result const& r) {
         return !r.diedBeforeInput && (useStrict ? strict(d, r) : loose(d, r));
@@ -196,7 +206,7 @@ Choice choose(PlayLayer* layer, ghost::Setup const& setup, bool down, bool wave,
 
     // the safe delays close above the smallest one
     std::vector<int> candidates;
-    for (int d = first; d <= std::min(limit, first + window); ++d) {
+    for (int d = first; d <= std::min(dmax, first + window); ++d) {
         if (pool[d]) candidates.push_back(d);
     }
 
@@ -234,8 +244,9 @@ Choice choose(PlayLayer* layer, ghost::Setup const& setup, bool down, bool wave,
 
     // Finer timing: when the tick before isn't safe, find the smallest safe delay
     // to a quarter of a tick, so your click moves only as much as it has to.
-    if (cfg.finerTiming && !dual && !c.random) {
-        bool beforeUnsafe = pick == 1 || (tested[pick - 1] && !pool[pick - 1]);
+    if (cfg.finerTiming && !dual && !c.random && pick >= 1) {
+        // the step before is unsafe: either it was tested, or it's the input as it is (no delay)
+        bool beforeUnsafe = pick - 1 < dmin || (tested[pick - 1] && !pool[pick - 1]);
         if (beforeUnsafe) {
             double lo = pick - 1;
             double hi = pick;
@@ -265,7 +276,7 @@ Choice choose(PlayLayer* layer, ghost::Setup const& setup, bool down, bool wave,
         }
         bool found = false;
         for (double d : order) {
-            if (d <= limit && sure(d)) {
+            if (d <= dmax && sure(d)) {
                 chosen = d;
                 found = true;
                 break;
@@ -275,8 +286,9 @@ Choice choose(PlayLayer* layer, ghost::Setup const& setup, bool down, bool wave,
         c.sure = true;
     }
 
+    c.ok = true;
     c.delay = chosen;
-    int whole = std::clamp(static_cast<int>(std::ceil(chosen - 1e-6)), 1, MAX_TICKS);
+    int whole = std::clamp(static_cast<int>(std::ceil(chosen - 1e-6)), 0, MAX_TICKS);
     c.result = survived[whole];
     return c;
 }
@@ -286,15 +298,16 @@ void remember(double ticks, int kind) {
 }
 
 void report(PlayLayer* layer, PlayerObject* p1, Choice const& c, bool down, int limit) {
-    double ms = c.delay * TICK_MS;
+    double ticks = c.delay + c.remainder; // real delay: the rest of this step + whole steps
+    double ms = ticks * TICK_MS;
     log::info("held {} back {} ({:.1f} ms): {} -> {} steps survived [limit {}]{}{}{}{}",
-        down ? "press" : "release", tickText(c.delay), ms, c.base, c.result, limit,
+        down ? "press" : "release", tickText(ticks), ms, c.base, c.result, limit,
         c.random ? ", random" : "", c.loose ? ", loose" : "", c.better ? ", best fix" : "", c.sure ? ", sure" : "");
     if (config().popup) {
-        popup::show(fmt::format("{} {:.1f} ms early ({})", down ? "click" : "release", ms, tickText(c.delay)));
+        popup::show(fmt::format("{} {:.1f} ms early ({})", down ? "click" : "release", ms, tickText(ticks)));
     }
-    window::saved({ static_cast<int>(std::lround(c.delay)), ms, modeOf(p1), !down, c.random, percentOf(layer) });
-    remember(c.delay, down ? 0 : 1);
+    window::saved({ static_cast<int>(std::lround(ticks)), ms, modeOf(p1), !down, c.random, percentOf(layer) });
+    remember(ticks, down ? 0 : 1);
 }
 
 void firePending(PlayLayer* layer) {
@@ -326,11 +339,11 @@ bool holdFix(PlayLayer* layer, PlayerObject* p1, PlayerObject* p2) {
     setup.flying = true;
     setup.fresh = cfg.freshGhost;
 
-    auto hold = ghost::run(layer, setup, 0, true, limit + 1);
+    auto hold = ghost::run(layer, setup, ghost::NOW, true, limit + 1);
     if (hold.hitStop || hold.survived >= limit) return false; // holding on is fine (or can't tell)
     bool mini = p1->m_vehicleSize < 1.f;
     int horizon = wave ? (mini ? 28 : 38) : 48;
-    auto letGo = ghost::run(layer, setup, 0, false, horizon);
+    auto letGo = ghost::run(layer, setup, ghost::NOW, false, horizon);
     if (letGo.hitStop || letGo.survived < horizon) return false; // letting go doesn't save you either
 
     feed(layer, false);
@@ -429,13 +442,18 @@ bool take(PlayLayer* layer, bool down, bool isPlayer1) {
     setup.dt = ghostDt(layer);
     setup.flying = flying;
     setup.fresh = cfg.freshGhost;
+    // Click Between Frames hands GD your click partway through a step: the rest of
+    // that step still runs before any whole step does
+    if (cfg.steadyTiming && g_phase > 0.f && g_fullDt > 0.f && g_phase < 0.9f * g_fullDt) {
+        setup.remainder = 1.f - g_phase / g_fullDt;
+    }
 
-    auto now = ghost::run(layer, setup, 0, down, horizon);
+    auto now = ghost::run(layer, setup, ghost::NOW, down, horizon);
     // fine as it is, or something ahead the ghost can't judge (an orb, a mode portal)
     if (now.hitStop || now.survived >= horizon) return pass();
 
     auto c = choose(layer, setup, down, wave, horizon, limit, now.survived);
-    if (c.delay <= 0.0) {
+    if (!c.ok) {
         auto line = fmt::format("{}% {} would hit something: let through ({}, limit {})", percentOf(layer),
             down ? "click" : "release", c.why, limit);
         log::info("{}", line);
@@ -458,7 +476,7 @@ float beforeStep(PlayLayer* layer, float dt) {
     if (layer->m_attempts != g_attempt) {
         g_attempt = layer->m_attempts;
         window::attempt(g_attempt, false);
-        g_accum = 0.f;
+        g_phase = 0.f;
     }
 
     g_recent[g_recentAt] = dt;
@@ -470,17 +488,16 @@ float beforeStep(PlayLayer* layer, float dt) {
     if (!cfg.enabled) return 0.f;
     if (g_sinceInput < 999) g_sinceInput++;
 
-    bool waiting = g_pending.active || g_flip.active;
-    // Steady timing: count full steps only, so Click Between Frames' split
-    // steps don't make a wait a tick short.
-    bool counts = true;
-    if (cfg.steadyTiming && waiting && g_fullDt > 0.f) {
-        g_accum += dt;
-        if (g_accum + 1e-4f >= g_fullDt) g_accum -= g_fullDt;
-        else counts = false;
+    // Steady timing: Click Between Frames runs a step in parts. Only the call that
+    // starts a step counts (and fires inputs), so waits are whole steps long.
+    bool counts = !cfg.steadyTiming || g_phase <= 0.f;
+    if (cfg.steadyTiming) {
+        g_phase += dt;
+        g_completes = g_phase >= 0.9f * g_fullDt;
     }
     else {
-        g_accum = 0.f;
+        g_phase = 0.f;
+        g_completes = true;
     }
 
     auto p1 = layer->m_player1;
@@ -501,11 +518,11 @@ float beforeStep(PlayLayer* layer, float dt) {
         }
         if (g_pending.frac > 0.f) {
             // finer timing: fire it this far into the step (split step, see the update hook)
-            if (cfg.finerTiming && !p2 && dt >= 0.9f * g_fullDt) {
+            if (cfg.finerTiming && !p2 && dt >= 0.9f * g_fullDt && ghost::splittable(p1)) {
                 g_splitArmed = true;
                 return g_pending.frac;
             }
-            // can't split this step: fire at the start of the next one (that whole tick was checked)
+            // can't split this step (the ghost knew): fire at the start of the next one
             g_pending.frac = 0.f;
             g_pending.elapsed++;
             return 0.f;
@@ -545,6 +562,7 @@ void fireSplit(PlayLayer* layer) {
 }
 
 void afterStep(PlayLayer* layer, float dt) {
+    if (g_completes || g_phase > 1.5f * g_fullDt) g_phase = 0.f;
     float warp = layer->m_gameState.m_timeWarp;
     g_dt = warp > 0.f ? dt / warp : dt;
     g_clock += g_dt;
@@ -578,7 +596,7 @@ void levelStarted(PlayLayer* layer) {
     g_isP1 = true;
     g_sinceInput = 999;
     g_burst = 0;
-    g_accum = 0.f;
+    g_phase = 0.f;
     g_lastHelp = {};
     g_attempt = layer->m_attempts;
     popup::attach(layer);
@@ -597,7 +615,7 @@ void reset() {
     cancel();
     g_fed = false;
     g_burst = 0;
-    g_accum = 0.f;
+    g_phase = 0.f;
     ghost::clearTracks();
 }
 

@@ -129,9 +129,9 @@ public:
     }
     ~Movers() { restore(); }
 
-    // Positions for ghost step `step` (0 = the first step after the input arrives).
-    void place(int step) {
-        double t = (step + 1) * static_cast<double>(m_dt);
+    // Positions `steps` after the input arrived.
+    void place(double steps) {
+        double t = steps * static_cast<double>(m_dt);
         for (auto& m : m_moved) {
             m.object->setPosition({ static_cast<float>(m.node.x + m.vx * t), static_cast<float>(m.node.y + m.vy * t) });
         }
@@ -205,62 +205,32 @@ Result run(PlayLayer* layer, Setup const& s, double delay, bool down, int horizo
     int count = dual ? 2 : 1;
     PlayerObject* real[2] { s.p1, s.p2 };
 
-    delay = std::max(0.0, delay);
-    int inputStep = static_cast<int>(std::floor(delay + 1e-6));
-    float frac = static_cast<float>(delay - inputStep);
+    bool now = delay < 0.0;
+    int inputStep = now ? -1 : static_cast<int>(std::floor(delay + 1e-6));
+    float frac = now ? 0.f : static_cast<float>(delay - inputStep);
     if (frac < 0.01f) frac = 0.f;
+    float rem = std::clamp(s.remainder, 0.f, 0.999f);
+    if (rem < 0.01f) rem = 0.f;
 
     RunGuard guard;
     Movers movers(config().movingObjects, s.dt);
     for (int i = 0; i < count; ++i) {
         if (s.fresh) freshen(g_ghost[i]);
         mirror(g_ghost[i], real[i]);
-        if (delay > 0.0) press(i, !down); // the button as it is now, until the input
+        if (now) press(i, down);
+        else if (delay > 0.0 || rem > 0.f) press(i, !down); // the button as it is now, until the input
     }
+    bool applied = now;
+    double t = 0.0; // steps since the input arrived (for moving objects)
 
-    int total = horizon + inputStep;
     // per player: cube-like modes count a jump that lands and stays down as safe
     int grounded[2] {};
     int airborne[2] {};
     bool clear[2] {};
-    for (int step = 0; step < total; ++step) {
-        bool beforeInput = step < inputStep;
-        movers.place(step);
-
-        for (int i = 0; i < count; ++i) {
-            if (step == inputStep && frac > 0.f) {
-                // the input lands `frac` of the way into this step
-                g_ghost[i]->update(s.dt * frac);
-                press(i, down);
-                g_ghost[i]->update(s.dt * (1.f - frac));
-            }
-            else {
-                if (step == inputStep) press(i, down);
-                g_ghost[i]->update(s.dt);
-            }
-            g_ghost[i]->updateRotation(s.dt);
-        }
-        if (g_dead) {
-            result.diedBeforeInput = beforeInput;
-            return result;
-        }
-        for (int i = 0; i < count; ++i) {
-            clearLogs(g_ghost[i]);
-            layer->checkCollisions(g_ghost[i], s.dt, false);
-            if (g_dead) {
-                result.diedBeforeInput = beforeInput;
-                return result;
-            }
-        }
-        if (g_stopped) {
-            result.hitStop = true;
-            return result;
-        }
-
-        if (beforeInput) continue;
+    auto afterInputStep = [&]() -> bool { // true = the run is over
         result.survived++;
-        if (s.flying) continue;
-
+        if (result.survived >= horizon) return true;
+        if (s.flying) return false;
         bool allClear = true;
         for (int i = 0; i < count; ++i) {
             if (!clear[i]) {
@@ -277,10 +247,97 @@ Result run(PlayLayer* layer, Setup const& s, double delay, bool down, int horizo
         if (allClear) {
             result.survived = horizon;
             result.cleared = true;
+            return true;
+        }
+        return false;
+    };
+    // collisions at the end of a step; false = the run ended (death / something it can't use)
+    auto collide = [&](bool beforeInput) {
+        for (int i = 0; i < count; ++i) {
+            clearLogs(g_ghost[i]);
+            layer->checkCollisions(g_ghost[i], s.dt, false);
+            if (g_dead) {
+                result.diedBeforeInput = beforeInput;
+                return false;
+            }
+        }
+        if (g_stopped) {
+            result.hitStop = true;
+            return false;
+        }
+        return true;
+    };
+
+    // the rest of the step your input arrived in
+    if (rem > 0.f) {
+        t += rem;
+        movers.place(t);
+        for (int i = 0; i < count; ++i) {
+            g_ghost[i]->update(s.dt * rem);
+            g_ghost[i]->updateRotation(s.dt * rem);
+        }
+        if (g_dead) {
+            result.diedBeforeInput = !applied;
             return result;
         }
+        if (!collide(!applied)) return result;
+        if (applied && afterInputStep()) return result;
+    }
+
+    bool pressNext = false; // the split wasn't possible: the input goes in at the start of the next step
+    int cap = horizon + std::max(inputStep, 0) + 2;
+    for (int step = 0; step < cap; ++step) {
+        t += 1.0;
+        movers.place(t);
+        bool pressing = !applied && (pressNext || (step == inputStep && frac == 0.f));
+        bool splitting = !applied && !pressing && step == inputStep && frac > 0.f;
+        if (splitting && (dual || !splittable(g_ghost[0]))) {
+            splitting = false;
+            pressNext = true; // same fallback as the real game: whole step now, input at the next one
+        }
+        for (int i = 0; i < count; ++i) {
+            if (pressing) press(i, down);
+            if (splitting) {
+                bool startedOnGround = g_ghost[i]->m_isOnGround;
+                g_ghost[i]->update(s.dt * frac);
+                splitCollide(layer, g_ghost[i], startedOnGround, s.dt);
+                press(i, down);
+                g_ghost[i]->update(s.dt * (1.f - frac));
+            }
+            else {
+                g_ghost[i]->update(s.dt);
+            }
+            g_ghost[i]->updateRotation(s.dt);
+        }
+        if (pressing || splitting) {
+            applied = true;
+            pressNext = false;
+        }
+        if (g_dead) {
+            result.diedBeforeInput = !applied;
+            return result;
+        }
+        if (!collide(!applied)) return result;
+        if (applied && afterInputStep()) return result;
     }
     return result;
+}
+
+bool splittable(PlayerObject* p) {
+    return p->m_isOnGround || (p->m_touchingRings && p->m_touchingRings->count()) || p->m_isDashing || p->m_isDart
+        || p->m_isBird || p->m_isShip || p->m_isSwing;
+}
+
+void splitCollide(PlayLayer* layer, PlayerObject* p, bool startedOnGround, float dt) {
+    // (as Click Between Frames does it) a platform moving down would otherwise drop the ground under you
+    if ((p->m_yVelocity < 0) ^ p->m_isUpsideDown) p->m_isOnGround = startedOnGround;
+    if (!p->m_isOnSlope || p->m_isDart) layer->checkCollisions(p, 0.f, true);
+    else layer->checkCollisions(p, dt, true);
+    clearLogs(p);
+    p->m_lastCollisionLeft = -1;
+    p->m_lastCollisionRight = -1;
+    p->m_lastCollisionBottom = -1;
+    p->m_lastCollisionTop = -1;
 }
 
 bool running() { return g_running; }
