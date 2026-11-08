@@ -126,7 +126,7 @@ std::string tickText(double ticks) {
         int t = static_cast<int>(std::lround(ticks));
         return fmt::format("+{} tick{}", t, t == 1 ? "" : "s");
     }
-    return fmt::format("+{:g} ticks", ticks);
+    return fmt::format("+{:.1f} ticks", ticks);
 }
 
 struct Choice {
@@ -577,7 +577,7 @@ void died(PlayLayer* layer) {
     if (!cfg.deathCheck || !g_lastHelp.active) return;
     long long since = g_step - g_lastHelp.step;
     g_lastHelp.active = false;
-    if (since > 240) return; // more than a second ago: not related
+    if (since > 144) return; // more than 0.6 s ago: a later obstacle, not that input
     double seconds = since / 240.0;
     std::string what = g_lastHelp.kind == 2 ? "hold fix let go"
                      : fmt::format("a held-back {} ({})", g_lastHelp.kind == 1 ? "release" : "click", tickText(g_lastHelp.ticks));

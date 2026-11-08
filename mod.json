@@ -3,7 +3,7 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v2.2.0",
+	"version": "v2.2.1",
 	"id": "ai.predictivebuffer",
 	"name": "Predictive Input Buffer",
 	"developer": "lilWC",
@@ -66,7 +66,7 @@
 			"type": "bool",
 			"name": "Death Check",
 			"default": true,
-			"description": "When you die within a second of the buffer changing an input, says so in game and in the window, so you know if it helped or hurt."
+			"description": "When you die within 0.6 s of the buffer changing an input (about one jump), says so in game and in the window, so you know if it helped or hurt."
 		},
 		"modes-title": {
 			"type": "title",
