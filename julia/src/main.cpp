@@ -205,9 +205,16 @@ public:
     float m_offset[4] = { 0, 0, 0, 0 };
     float m_time = 0.f;
 
+    // holds on to its shader: GD throws its shader cache away when it reloads graphics
+    // (texture pack applied, graphics settings...), and a shader nobody holds is freed
+    ~CuteQuad() override {
+        if (m_program) m_program->release();
+    }
+
     static CuteQuad* create(CCGLProgram* program) {
         auto ret = new CuteQuad();
         if (ret->init()) {
+            program->retain();
             ret->m_program = program;
             ret->m_sizeLoc = program->getUniformLocationForName("u_size");
             ret->m_resLoc = program->getUniformLocationForName("u_res");
@@ -277,6 +284,14 @@ CCGLProgram* program() {
 
 // The shared texture every background shows (nullptr if it can't be made).
 CCTexture2D* texture() {
+    // GD reloaded its graphics (its shader cache no longer has ours): build everything again
+    if (g_quad && CCShaderCache::sharedShaderCache()->programForKey("chaz.made-for-julia/cute") != g_quad->m_program) {
+        g_target->release();
+        g_quad->release();
+        g_target = nullptr;
+        g_quad = nullptr;
+        g_failed = false;
+    }
     auto win = CCDirector::get()->getWinSize();
     if (g_target && win.height > 0 && std::abs(win.width / win.height - g_aspect) > 0.01f) {
         g_target->release();

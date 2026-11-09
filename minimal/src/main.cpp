@@ -195,9 +195,16 @@ public:
     GLint m_offsetLoc = -1;
     float m_offset[4] = { 0, 0, 0, 0 };
 
+    // holds on to its shader: GD throws its shader cache away when it reloads graphics
+    // (texture pack applied, graphics settings...), and a shader nobody holds is freed
+    ~FlowQuad() override {
+        if (m_program) m_program->release();
+    }
+
     static FlowQuad* create(CCGLProgram* program) {
         auto ret = new FlowQuad();
         if (ret->init()) {
+            program->retain();
             ret->m_program = program;
             ret->m_sizeLoc = program->getUniformLocationForName("u_size");
             ret->m_offsetLoc = program->getUniformLocationForName("u_offset");
@@ -259,6 +266,14 @@ float g_flowAspect = 0.f;
 
 // The shared texture all backgrounds show, or nullptr if it can't be made.
 CCTexture2D* flowTexture() {
+    // GD reloaded its graphics (its shader cache no longer has ours): build everything again
+    if (g_flowQuad && CCShaderCache::sharedShaderCache()->programForKey("chaz.minimal-helper/flow") != g_flowQuad->m_program) {
+        g_flowTarget->release();
+        g_flowQuad->release();
+        g_flowTarget = nullptr;
+        g_flowQuad = nullptr;
+        g_flowFailed = false;
+    }
     // remake it if the window changed shape, so the clouds never look stretched
     auto winNow = CCDirector::get()->getWinSize();
     if (g_flowTarget && winNow.height > 0 && std::abs(winNow.width / winNow.height - g_flowAspect) > 0.01f) {

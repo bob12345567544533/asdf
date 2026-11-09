@@ -3,7 +3,7 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v1.4.0",
+	"version": "v1.4.1",
 	"id": "chaz.made-for-julia",
 	"name": "julia",
 	"developer": "chaz",
