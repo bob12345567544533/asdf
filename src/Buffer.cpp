@@ -83,6 +83,7 @@ float g_seenDt = 0.25f;   // the largest of them (a split step's parts are small
 float g_exactDt = 0.25f;  // a whole step, measured between two of the game's end-of-step checks
 bool g_exact = false;     // ... which is known
 int g_exactAge = 0;
+float g_nextDt = 0.f;     // a different step size seen once (taken over when it shows up again)
 
 constexpr int SNAP_EVERY = 24; // steps between coach snapshots
 
@@ -502,7 +503,7 @@ bool take(PlayLayer* layer, bool down, bool isPlayer1) {
 
     auto const& cfg = config();
     auto p1 = layer->m_player1;
-    if (p1 && p1->m_isDead) coach::lateInput(down); // a click that came after the death
+    coach::lateInput(down); // (after a death: the click that came too late)
 
     g_isP1 = isPlayer1;
     g_held = down;
@@ -585,7 +586,7 @@ bool take(PlayLayer* layer, bool down, bool isPlayer1) {
     setup.dt = stepDt();
     setup.flying = flying;
     setup.fresh = cfg.freshGhost;
-    setup.heldBefore = g_fed;
+    setup.heldBefore = !down; // until a delayed click the button is up, until a delayed release it's down
     // Click Between Frames hands GD your click partway through a step: the rest of
     // that step still runs before any whole step does
     float full = fullDt();
@@ -797,9 +798,20 @@ void stepEnded() {
     // everything player 1's update got since the last end of step is one whole step
     // (more than the largest single call would be several steps: not trusted)
     if (g_sum > 0.001f && g_sum < 2.f && g_sum <= g_seenDt * 1.05f) {
-        g_exactDt = g_sum;
-        g_exact = true;
-        g_exactAge = 0;
+        auto same = [](float a, float b) { return std::abs(a - b) <= 0.02f * std::max(a, b); };
+        if (!g_exact) {
+            // nothing to go on yet: a whole step is the largest call there's been
+            if (same(g_sum, g_seenDt)) {
+                g_exactDt = g_sum;
+                g_exact = true;
+            }
+        }
+        else if (!same(g_sum, g_exactDt)) {
+            // the step size changed (time warp): believe it once it shows up twice
+            if (same(g_sum, g_nextDt)) g_exactDt = g_sum;
+            else g_nextDt = g_sum;
+        }
+        if (g_exact) g_exactAge = 0;
     }
     g_sum = 0.f;
     g_phase = 0.f;

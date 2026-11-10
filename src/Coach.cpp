@@ -27,6 +27,7 @@ constexpr int MARGIN = 16;       // a replay has to live this many steps past th
 constexpr int MAX_REPLAY = 420;  // steps: further back than this it isn't worth it
 constexpr double LATE_WAIT = 0.2; // seconds after the death a click still counts as "the late click"
 constexpr double SLICE_MS = 3.0; // work per frame
+constexpr double RESET_MS = 8.0; // ... and at most this much right before a restart
 
 struct Rec {
     double time = 0.0;
@@ -115,7 +116,8 @@ ghost::Setup setupFor(Job const& j) {
 
 bool lives(PlayLayer* layer, Job const& j, std::vector<ghost::Input> const& inputs) {
     auto r = ghost::replay(layer, setupFor(j), inputs.data(), static_cast<int>(inputs.size()), j.deathIdx + MARGIN);
-    return !r.died && !r.hitStop;
+    // (something the ghost can't use a little after the spot you died at still counts as made it)
+    return !r.died && (!r.hitStop || r.survived >= j.deathIdx + 4);
 }
 
 // The result is in: write the line.
@@ -165,7 +167,7 @@ void work(PlayLayer* layer) {
             // can it say anything about what would have been different.
             auto r = ghost::replay(layer, setupFor(j), j.real.data(), static_cast<int>(j.real.size()), j.deathIdx + 3);
             if (!r.died || std::abs(r.deathStep - j.deathIdx) > 1) {
-                log::debug("coach: couldn't replay the death at {}% (died {} step {}, expected {}{})", j.death.percent,
+                log::info("coach: couldn't replay the death at {}% (died {} step {}, expected {}{})", j.death.percent,
                     r.died, r.deathStep, j.deathIdx, r.hitStop ? ", stopped" : "");
                 j.stage = Stage::Done;
                 j.active = false;
@@ -261,10 +263,28 @@ void levelEnded() {
     g_job = {};
 }
 
+// Replays until the work is done or `ms` are used up.
+static void workFor(PlayLayer* layer, double ms) {
+    auto& j = g_job;
+    auto start = std::chrono::steady_clock::now();
+    while (j.active && j.stage != Stage::Wait && j.stage != Stage::Done) {
+        work(layer);
+        std::chrono::duration<double, std::milli> spent = std::chrono::steady_clock::now() - start;
+        if (spent.count() > ms) break;
+    }
+}
+
+void beforeReset(PlayLayer* layer, bool safe) {
+    auto& j = g_job;
+    if (!j.active || !safe || !layer || layer != g_layer || !ghost::ready()) return;
+    workFor(layer, RESET_MS);
+}
+
 void reset() {
-    // a restart before the work was done: say what's known so far
     if (g_job.active) {
-        if (g_job.found) finish();
+        // still waiting to see how late your click comes: that can go on after the restart
+        if (g_job.stage == Stage::Wait) {}
+        else if (g_job.found || g_job.stage == Stage::Done) finish();
         else g_job = {};
     }
     g_inputs.clear();
@@ -378,12 +398,7 @@ void tick(PlayLayer* layer, float dt) {
         if (command.m_button == PlayerButton::Jump) lateInput(command.m_isPush);
     }
 
-    auto start = std::chrono::steady_clock::now();
-    while (j.active && j.stage != Stage::Wait && j.stage != Stage::Done) {
-        work(layer);
-        std::chrono::duration<double, std::milli> spent = std::chrono::steady_clock::now() - start;
-        if (spent.count() > SLICE_MS) break;
-    }
+    workFor(layer, SLICE_MS);
     if (!j.active) return;
     if (j.stage == Stage::Done) return finish();
     if (j.stage == Stage::Wait && (j.lateSeen[j.release ? 0 : 1] || j.sinceDeath > LATE_WAIT)) finish();

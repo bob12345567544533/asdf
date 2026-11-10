@@ -9,7 +9,10 @@ namespace pb::coach {
 
 void levelStarted(PlayLayer* layer);
 void levelEnded();
-// Death / restart: wrap up whatever is still being worked out, forget the inputs.
+// The level is about to restart: finish working out the last death while the
+// level still looks like it did (`safe`: not called from inside a physics step).
+void beforeReset(PlayLayer* layer, bool safe);
+// The level restarted: forget the inputs.
 void reset();
 
 // An input reached the game at `time` (in steps). `moved`: ticks the buffer held it back.
@@ -32,7 +35,7 @@ struct Death {
     int limit = 0;     // the buffer's limit in this mode
 };
 void died(PlayLayer* layer, Death const& death);
-// An input arrived after the death (a click that came too late to count).
+// An input arrived (after a death it's the click that came too late to count).
 void lateInput(bool down);
 
 // Once a frame, between physics steps: a slice of the work.

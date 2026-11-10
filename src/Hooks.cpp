@@ -120,6 +120,9 @@ bool g_padsSafe = true;
 bool g_didSplit = false;
 CCPoint g_splitFrom { 0.f, 0.f };
 
+// Inside the game's own collision check (where no ghost may run).
+int g_colliding = 0;
+
 bool isPlayLayer(GJBaseGameLayer* self) {
     auto layer = PlayLayer::get();
     return layer && static_cast<GJBaseGameLayer*>(layer) == self;
@@ -210,6 +213,7 @@ class $modify(PBPlayLayer, PlayLayer) {
     }
 
     void resetLevel() {
+        pb::coach::beforeReset(this, g_colliding == 0 && !pb::ghost::running());
         PlayLayer::resetLevel();
         pb::buffer::reset();
     }
@@ -260,8 +264,11 @@ class $modify(GJBaseGameLayer) {
     // The game's own collision check for player 1 ends each physics step (Click
     // Between Frames' checks in the middle of a step don't deal damage).
     int checkCollisions(PlayerObject* player, float dt, bool ignoreDamage) {
+        if (pb::ghost::running()) return GJBaseGameLayer::checkCollisions(player, dt, ignoreDamage);
+        g_colliding++;
         int result = GJBaseGameLayer::checkCollisions(player, dt, ignoreDamage);
-        if (!ignoreDamage && !pb::ghost::running() && isPlayLayer(this) && player == m_player1) pb::buffer::stepEnded();
+        g_colliding--;
+        if (!ignoreDamage && isPlayLayer(this) && player == m_player1) pb::buffer::stepEnded();
         return result;
     }
 
