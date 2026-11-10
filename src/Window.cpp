@@ -46,16 +46,43 @@ constexpr int MAX_TICKS = 24;
 constexpr int MAIN_SLIDERS = 2; // buffer, randomize (big rows)
 constexpr int MODE_SLIDERS = 8; // per-mode limits (small grid)
 constexpr int SLIDERS = MAIN_SLIDERS + MODE_SLIDERS;
-constexpr int TOGGLES = 4;
+constexpr int TOGGLE_GROUP = 8;  // switches per group (a grid of two columns)
+constexpr int TOGGLE_GROUPS = 2;
+constexpr int TOGGLES = TOGGLE_GROUP * TOGGLE_GROUPS;
 constexpr int MODES = 8;
+constexpr int TABS = 2;
+constexpr int TAB_LIVE = 0;     // what's happening: timing, deaths, the log
+constexpr int TAB_SETTINGS = 1; // everything you can change
 
-constexpr char const* TOGGLE_KEYS[TOGGLES] { "enabled", "buffer-releases", "buffer-ship", "show-feedback" };
-constexpr wchar_t const* TOGGLE_NAMES[TOGGLES] { L"Enabled", L"Releases", L"Ship", L"Timing popup" };
+constexpr wchar_t const* TAB_NAMES[TABS] { L"LIVE", L"SETTINGS" };
+constexpr wchar_t const* GROUP_NAMES[TOGGLE_GROUPS] { L"SWITCHES", L"HOW IT JUDGES A CLICK" };
+constexpr char const* TOGGLE_KEYS[TOGGLES] {
+    "enabled", "buffer-releases", "buffer-ship", "hold-fix", "coach", "show-feedback", "death-check", "practice-only",
+    "finer-timing-v3", "best-fix", "confidence-check", "smart-safety", "moving-objects", "through-pads", "through-orbs", "tap-model",
+};
+constexpr bool TOGGLE_DEFAULTS[TOGGLES] { true, true, false, true, true, true, true, false,
+                                          true, true, true, true, true, true, true, true };
+constexpr wchar_t const* TOGGLE_NAMES[TOGGLES] {
+    L"Enabled", L"Releases", L"Ship", L"Hold fix", L"Coach", L"Timing popup", L"Death check", L"Practice only",
+    L"Finer timing", L"Best fix", L"Only when sure", L"Smart safety", L"Moving objects", L"Pads + portals", L"Orbs", L"Learn my taps",
+};
 constexpr wchar_t const* TOGGLE_HELP[TOGGLES] {
     L"Turns the buffer on or off. The toggle key (F6) also cycles 2, 4, 8 and 16 ticks, then off.",
     L"Also holds back early releases in wave and robot (and ship when Ship is on), where letting go too early kills you.",
     L"Lets the buffer work in ship mode. Off by default: ship predictions are less reliable.",
+    L"Wave (and ship when Ship is on): when holding on a little too long would kill you and letting go right then is safe, lets go for you.",
+    L"After each death, works out how early or late your click was and shows it on the LIVE tab. Works with the buffer off too. Starts with the next level you open.",
     L"Shows in game how early each held-back click was.",
+    L"Says so when you die within 0.6 s of the buffer changing one of your inputs, so you know if it helped or hurt.",
+    L"Only helps in practice mode.",
+    L"Delays in quarter ticks, so a click moves only as much as it has to.",
+    L"Compares the safe delays further ahead and takes the one that keeps you alive longest.",
+    L"Only helps when a quarter tick later would be safe too. If not, your click goes through untouched.",
+    L"Cube-like modes: prefers delays where the jump fully clears or lands.",
+    L"The ghost moves blocks and spikes that are moving along with it instead of treating them as still.",
+    L"The ghost uses jump pads, speed portals and gravity portals itself, so the buffer still helps near them.",
+    L"The ghost uses yellow, pink, red, blue, green and black orbs itself (each kind after you've hit it once).",
+    L"Learns how long you hold your clicks in each mode, so the ghost lets go when you would.",
 };
 constexpr char const* SLIDER_KEYS[SLIDERS] { "buffer-ticks", "randomize", "max-cube", "max-ship", "max-ball", "max-ufo",
                                             "max-wave", "max-robot", "max-spider", "max-swing" };
@@ -64,13 +91,17 @@ constexpr wchar_t const* SLIDER_NAMES[SLIDERS] { L"BUFFER", L"RANDOMIZE", L"CUBE
 constexpr wchar_t const* MODE_HELP =
     L"Most this mode may be delayed, in ticks. BUFFER still caps every mode: the lower of the two wins (faded = capped by BUFFER).";
 constexpr wchar_t const* SLIDER_HELP[MAIN_SLIDERS] {
-    L"Largest delay the buffer may add to a click that would kill you, in ticks (1 tick = 4.2 ms). Each gamemode can be capped lower in the mod settings. 0 = off.",
+    L"Largest delay the buffer may add to a click that would kill you, in ticks (1 tick = 4.2 ms). Each gamemode can be capped lower below. 0 = off.",
     L"0 = always the smallest safe delay. Above 0 = any safe delay up to this many ticks above the smallest one.",
 };
-constexpr wchar_t const* IDLE_HELP = L"Hover something to see what it does  ·  F7 shows / hides this window";
+constexpr wchar_t const* TIMING_HELP =
+    L"Every death the coach could work out, placed by how far off your click was. Left of the middle = you clicked too early, right = too late. Brighter = more recent.";
+constexpr wchar_t const* DEATHS_HELP = L"Where in the level you died. Taller = more deaths at that spot, red = the last one.";
+constexpr wchar_t const* LIVE_HELP = L"F7 show / hide  ·  F6 cycle the buffer  ·  mouse wheel scrolls the log";
+constexpr wchar_t const* SETTINGS_HELP = L"Hover something to see what it does";
 constexpr wchar_t const* MODE_NAMES[MODES] { L"cube", L"ship", L"ball", L"ufo", L"wave", L"robot", L"spider", L"swing" };
 
-// Colors (black and white, no gray accents)
+// Colors: black and white, plus one colour each for early, late and bad news.
 constexpr uint32_t C_BG = 0x121212;
 constexpr uint32_t C_HOVER = 0x1a1a1a;
 constexpr uint32_t C_LINE = 0x2a2a2a;
@@ -85,24 +116,35 @@ constexpr uint32_t C_EARLY = 0x7cc4ff; // coach: you were early
 
 // Layout, in logical pixels (scaled for the monitor)
 constexpr float W = 454.f;
-constexpr float H = 680.f + 220.f + 61.f; // + the per-mode grid (header 30, 4 rows of 46, gap 6) + the coach row
+constexpr float H = 900.f;
 constexpr float PAD = 22.f;
 constexpr float TITLE_H = 48.f;
-constexpr float STATS_Y = 49.f;
+constexpr float TAB_Y = TITLE_H + 1.f;
+constexpr float TAB_H = 36.f;
+constexpr float TOP = TAB_Y + TAB_H + 1.f; // where a tab's own content starts
+constexpr float FOOTER_H = 46.f; // room for three lines of help
+// LIVE
+constexpr float STATS_Y = TOP;
 constexpr float STATS_H = 60.f;
-constexpr float COACH_Y = STATS_Y + STATS_H + 1.f;
-constexpr float COACH_H = 60.f;
-constexpr float SLIDER_Y = COACH_Y + COACH_H + 1.f;
+constexpr float TIMING_Y = STATS_Y + STATS_H + 1.f;
+constexpr float TIMING_H = 124.f;
+constexpr float DEATHS_Y = TIMING_Y + TIMING_H + 1.f;
+constexpr float DEATHS_H = 70.f;
+constexpr float LOG_Y = DEATHS_Y + DEATHS_H + 12.f;
+constexpr float TIMING_RANGE = 80.f; // ms from the middle of the timing bar to either end
+constexpr size_t TIMING_MAX = 40;    // deaths it shows
+// SETTINGS
+constexpr float SLIDER_Y = TOP;
 constexpr float SLIDER_H = 82.f;
 constexpr float MODE_Y = SLIDER_Y + MAIN_SLIDERS * (SLIDER_H + 1.f);
 constexpr float MODE_HEAD = 30.f;
 constexpr float MODE_CELL_H = 46.f;
 constexpr float MODE_GAP = 24.f;  // between the two columns
 constexpr int MODE_ROWS = MODE_SLIDERS / 2;
-constexpr float TOGGLE_Y = MODE_Y + MODE_HEAD + MODE_ROWS * MODE_CELL_H + 6.f;
-constexpr float TOGGLE_H = 38.f;
-constexpr float LOG_Y = TOGGLE_Y + TOGGLES * TOGGLE_H + 14.f;
-constexpr float FOOTER_H = 30.f;
+constexpr float TOGGLE_Y = MODE_Y + MODE_HEAD + MODE_ROWS * MODE_CELL_H + 8.f;
+constexpr float TOGGLE_HEAD = 28.f;
+constexpr float TOGGLE_H = 34.f;
+constexpr float TOGGLE_GROUP_H = TOGGLE_HEAD + (TOGGLE_GROUP / 2) * TOGGLE_H + 6.f;
 constexpr float TRACK_X0 = PAD + 7.f;
 constexpr float TRACK_X1 = W - PAD - 7.f;
 
@@ -119,11 +161,16 @@ constexpr UINT WM_DPI_CHANGED = 0x02E0;
 
 struct Values {
     int sliders[SLIDERS] { 2, 3, 24, 8, 24, 6, 8, 24, 24, 6 }; // max ticks, randomize, per-mode limits
-    bool toggles[TOGGLES] { true, true, false, true };
+    bool toggles[TOGGLES] {};
     bool hasPos = false;
     int x = 0;
     int y = 0;
     int sizePercent = 100;
+    int tab = TAB_LIVE;
+
+    Values() {
+        for (int i = 0; i < TOGGLES; ++i) toggles[i] = TOGGLE_DEFAULTS[i];
+    }
 };
 
 struct Item {
@@ -141,15 +188,16 @@ struct Attempt {
 };
 
 struct Event {
-    enum Type { Note, Saved, NewAttempt, Death, Accuracy, CoachStats } type = Note;
+    enum Type { Note, Saved, NewAttempt, Death, Accuracy, CoachStats, Timing } type = Note;
     Item item;
-    Coach coach;
     int number = 0;
     bool newLevel = false;
+    Coach coach;
+    float ms = 0.f;
 };
 
-constexpr size_t MAX_ATTEMPTS = 40;
-constexpr size_t MAX_ITEMS = 60;
+constexpr size_t MAX_ATTEMPTS = 60;
+constexpr size_t MAX_ITEMS = 80;
 
 std::atomic<HWND> g_window = nullptr;
 std::atomic<HWND> g_game = nullptr;
@@ -164,6 +212,12 @@ double g_levelMs = 0.0;
 int g_checks = 0; // self-check: predictions compared this session
 int g_hits = 0;   // ... and how many were right
 Coach g_coach;    // the coach's numbers for this level
+std::vector<float> g_timing; // ... and each death it worked out: ms off (below 0 = early), oldest first
+int g_deaths[101] {};        // deaths at each level % (this level)
+int g_deathCount = 0;
+int g_lastDeath = -1;
+int g_tab = TAB_LIVE;
+int g_logScroll = 0; // log rows scrolled away from the newest
 int g_hover = -1;
 int g_dragging = -1;
 int g_focus = 0; // slider the arrow keys change
@@ -184,6 +238,7 @@ Values readSettings() {
     v.x = static_cast<int>(mod->getSavedValue<int64_t>("window-x", 0));
     v.y = static_cast<int>(mod->getSavedValue<int64_t>("window-y", 0));
     v.sizePercent = static_cast<int>(mod->getSettingValue<int64_t>("window-size"));
+    v.tab = std::clamp(static_cast<int>(mod->getSavedValue<int64_t>("window-tab", TAB_LIVE)), 0, TABS - 1);
     return v;
 }
 
@@ -204,6 +259,11 @@ void writeSettings(Values const& v) {
 void save() {
     Values copy = g_values;
     queueInMainThread([copy] { writeSettings(copy); });
+}
+
+void saveTab() {
+    int tab = g_tab;
+    queueInMainThread([tab] { Mod::get()->setSavedValue<int64_t>("window-tab", tab); });
 }
 
 void savePosition(HWND wnd) {
@@ -414,17 +474,55 @@ std::wstring fmtw(wchar_t const* format, ...) {
 wchar_t const* plural(int n) { return n == 1 ? L"" : L"s"; }
 
 // ===========================================================================
+// More drawing helpers
+// ===========================================================================
+
+// A line of a given colour across part of the window.
+void hseg(gp::Graphics& g, float x0, float x1, float y, uint32_t c = C_LINE) {
+    gp::Pen pen(col(c), 1.f);
+    g.DrawLine(&pen, x0, y + 0.5f, x1, y + 0.5f);
+}
+
+// A bar with fully round ends.
+void pill(gp::Graphics& g, RectF r, gp::Color c) {
+    if (r.Width < r.Height || r.Height <= 0.f) return;
+    gp::SolidBrush brush(c);
+    gp::GraphicsPath path;
+    float d = r.Height;
+    path.AddArc(r.X, r.Y, d, d, 90.f, 180.f);
+    path.AddArc(r.X + r.Width - d, r.Y, d, d, 270.f, 180.f);
+    path.CloseFigure();
+    g.FillPath(&brush, &path);
+}
+
+float spacedWidth(gp::Graphics& g, std::wstring_view s, Face face, float size, float spacing = 1.5f) {
+    float total = 0.f;
+    for (size_t i = 0; i < s.size(); ++i) total += measure(g, s.substr(i, 1), face, size);
+    return total + spacing * static_cast<float>(s.empty() ? 0 : s.size() - 1);
+}
+
+uint32_t toneColor(int tone) {
+    return tone == Late ? C_LATE : tone == Early ? C_EARLY : tone == Bad ? C_DANGER : C_MUTED;
+}
+
+// ===========================================================================
 // Geometry and hit testing
 // ===========================================================================
 
 constexpr int HIT_NONE = -1;
 constexpr int HIT_CLOSE = 0;
 constexpr int HIT_MINIMIZE = 1;
+constexpr int HIT_TAB = 2;     // + tab
+constexpr int HIT_TIMING = 5;
+constexpr int HIT_DEATHS = 6;
+constexpr int HIT_LOG = 7;
 constexpr int HIT_TOGGLE = 10; // + toggle
-constexpr int HIT_SLIDER = 20; // + slider
+constexpr int HIT_SLIDER = 40; // + slider
 
 RectF closeRect() { return box(W - PAD - 28.f, 12.f, 28.f, 24.f); }
 RectF minimizeRect() { return box(W - PAD - 58.f, 12.f, 28.f, 24.f); }
+float tabX(int i) { return PAD + i * 68.f; } // where a tab's label starts
+RectF tabRect(int i) { return box(tabX(i) - 8.f, TAB_Y, i == 0 ? 60.f : 104.f, TAB_H); }
 bool isMode(int i) { return i >= MAIN_SLIDERS; }
 RectF sliderRow(int i) {
     if (!isMode(i)) return box(PAD, SLIDER_Y + i * (SLIDER_H + 1.f), W - 2 * PAD, SLIDER_H);
@@ -435,9 +533,16 @@ RectF sliderRow(int i) {
 float trackY(int i) { return sliderRow(i).Y + (isMode(i) ? 33.f : 58.f); }
 float trackX0(int i) { return isMode(i) ? sliderRow(i).X + 6.f : TRACK_X0; }
 float trackX1(int i) { return isMode(i) ? sliderRow(i).X + sliderRow(i).Width - 6.f : TRACK_X1; }
-RectF toggleRow(int i) { return box(PAD, TOGGLE_Y + i * TOGGLE_H, W - 2 * PAD, TOGGLE_H); }
+float toggleGroupY(int group) { return TOGGLE_Y + group * TOGGLE_GROUP_H; }
+RectF toggleRow(int i) {
+    int k = i % TOGGLE_GROUP;
+    float cw = (W - 2 * PAD - MODE_GAP) / 2.f;
+    return box(PAD + (k % 2) * (cw + MODE_GAP), toggleGroupY(i / TOGGLE_GROUP) + TOGGLE_HEAD + (k / 2) * TOGGLE_H, cw, TOGGLE_H);
+}
 RectF footerRect() { return box(PAD, H - 14.f - FOOTER_H, W - 2 * PAD, FOOTER_H); }
-RectF logRect() { return box(PAD, LOG_Y, W - 2 * PAD, footerRect().Y - 8.f - LOG_Y); }
+RectF timingRect() { return box(PAD, TIMING_Y, W - 2 * PAD, TIMING_H); }
+RectF deathsRect() { return box(PAD, DEATHS_Y, W - 2 * PAD, DEATHS_H); }
+RectF logRect() { return box(PAD, LOG_Y, W - 2 * PAD, footerRect().Y - 10.f - LOG_Y); }
 
 float thumbX(int i, int v) { return trackX0(i) + (trackX1(i) - trackX0(i)) * (static_cast<float>(v) / MAX_TICKS); }
 
@@ -451,6 +556,15 @@ bool within(int hit, int base, int count) { return hit >= base && hit < base + c
 int hitTest(float x, float y) {
     if (closeRect().Contains(x, y)) return HIT_CLOSE;
     if (minimizeRect().Contains(x, y)) return HIT_MINIMIZE;
+    for (int i = 0; i < TABS; ++i) {
+        if (tabRect(i).Contains(x, y)) return HIT_TAB + i;
+    }
+    if (g_tab == TAB_LIVE) {
+        if (timingRect().Contains(x, y)) return HIT_TIMING;
+        if (deathsRect().Contains(x, y)) return HIT_DEATHS;
+        if (logRect().Contains(x, y)) return HIT_LOG;
+        return HIT_NONE;
+    }
     for (int i = 0; i < TOGGLES; ++i) {
         if (toggleRow(i).Contains(x, y)) return HIT_TOGGLE + i;
     }
@@ -460,10 +574,18 @@ int hitTest(float x, float y) {
     return HIT_NONE;
 }
 
+// Something you can click (gets the hand cursor).
+bool clickable(int hit) {
+    return hit == HIT_CLOSE || hit == HIT_MINIMIZE || within(hit, HIT_TAB, TABS) || within(hit, HIT_TOGGLE, TOGGLES)
+        || within(hit, HIT_SLIDER, SLIDERS);
+}
+
 std::wstring help() {
     int h = g_dragging >= 0 ? HIT_SLIDER + g_dragging : g_hover;
     if (within(h, HIT_SLIDER, SLIDERS)) return isMode(h - HIT_SLIDER) ? MODE_HELP : SLIDER_HELP[h - HIT_SLIDER];
     if (within(h, HIT_TOGGLE, TOGGLES)) return TOGGLE_HELP[h - HIT_TOGGLE];
+    if (h == HIT_TIMING) return TIMING_HELP;
+    if (h == HIT_DEATHS) return DEATHS_HELP;
     return {};
 }
 
@@ -474,13 +596,16 @@ std::wstring help() {
 void paintTitle(gp::Graphics& g) {
     bool on = g_values.toggles[0] && g_values.sliders[0] > 0;
     spaced(g, L"INPUT BUFFER", Face::Semi, 13.f, col(C_TEXT), box(PAD, 0, 200, TITLE_H), 2.f);
-    // state dot: filled when the buffer is on
-    float dx = PAD + 152.f;
+    // state: a filled dot and the range when the buffer is on
+    float dx = PAD + spacedWidth(g, L"INPUT BUFFER", Face::Semi, 13.f, 2.f) + 14.f;
     if (on) circle(g, dx, TITLE_H / 2.f, 3.5f, col(C_TEXT));
     else {
         gp::Pen pen(col(C_FAINT), 1.2f);
         g.DrawEllipse(&pen, dx - 3.5f, TITLE_H / 2.f - 3.5f, 7.f, 7.f);
     }
+    int v = g_values.sliders[0];
+    auto state = on ? fmtw(L"up to %d tick%ls", v, plural(v)) : std::wstring(L"off");
+    text(g, state, Face::Ui, 12.f, col(on ? C_MUTED : C_FAINT), box(dx + 12.f, 0, 140.f, TITLE_H));
 
     auto mr = minimizeRect();
     auto cr = closeRect();
@@ -495,7 +620,22 @@ void paintTitle(gp::Graphics& g) {
     hline(g, TITLE_H);
 }
 
-// Saves this attempt, this level, and how early they were on average.
+void paintTabs(gp::Graphics& g) {
+    for (int i = 0; i < TABS; ++i) {
+        bool active = g_tab == i;
+        bool hover = g_hover == HIT_TAB + i;
+        float x = tabX(i);
+        spaced(g, TAB_NAMES[i], active ? Face::Semi : Face::Ui, 11.f, col(active || hover ? C_TEXT : C_FAINT),
+            box(x, TAB_Y, 120.f, TAB_H), 1.6f);
+        if (active) {
+            float w = spacedWidth(g, TAB_NAMES[i], Face::Semi, 11.f, 1.6f);
+            fill(g, box(x, TAB_Y + TAB_H - 1.f, w, 2.f), col(C_TEXT));
+        }
+    }
+    hline(g, TAB_Y + TAB_H);
+}
+
+// Saves this attempt, this level, how early they were on average, and how right the ghost is.
 void paintStats(gp::Graphics& g) {
     int attemptSaves = 0;
     int attemptNumber = 0;
@@ -524,29 +664,111 @@ void paintStats(gp::Graphics& g) {
     hline(g, STATS_Y + STATS_H);
 }
 
-// The coach: how far off your timing was when you died (this level).
-void paintCoach(gp::Graphics& g) {
+// The coach: your last death in big, and every death it worked out on a bar
+// from "too early" (left) to "too late" (right).
+void paintTiming(gp::Graphics& g) {
+    float y = TIMING_Y;
+    bool hover = g_hover == HIT_TIMING;
+    spaced(g, L"TIMING", Face::Ui, 11.f, col(hover ? C_TEXT : C_MUTED), box(PAD, y + 8.f, 120.f, 18.f));
+
+    // averages, top right
     auto const& c = g_coach;
-    std::wstring values[4] {
-        c.early > 0 ? fmtw(L"%.0f ms", c.earlyMs / c.early) : std::wstring(L"–"),
-        c.late > 0 ? fmtw(L"%.0f ms", c.lateMs / c.late) : std::wstring(L"–"),
-        c.spot >= 0 ? fmtw(L"%d%%", c.spot) : std::wstring(L"–"),
-        c.calls > 0 ? fmtw(L"%d/%d", c.callHits, c.calls) : std::wstring(L"–"),
-    };
-    std::wstring labels[4] {
-        c.early > 0 ? fmtw(L"EARLY · %d×", c.early) : std::wstring(L"EARLY"),
-        c.late > 0 ? fmtw(L"LATE · %d×", c.late) : std::wstring(L"LATE"),
-        c.spot >= 0 ? fmtw(L"WORST · %d×", c.spotCount) : std::wstring(L"WORST SPOT"),
-        L"GHOST RIGHT",
-    };
-    uint32_t colors[4] { c.early > 0 ? C_EARLY : C_TEXT, c.late > 0 ? C_LATE : C_TEXT, C_TEXT, C_TEXT };
-    float colW = (W - 2 * PAD) / 4.f;
-    for (int i = 0; i < 4; ++i) {
-        float x = PAD + i * colW;
-        text(g, values[i], Face::Light, 22.f, col(colors[i]), box(x, COACH_Y + 6.f, colW, 28.f));
-        spaced(g, labels[i], Face::Ui, 9.5f, col(C_FAINT), box(x, COACH_Y + 34.f, colW, 18.f), 1.3f);
+    if (c.early > 0 || c.late > 0) {
+        auto early = c.early > 0 ? fmtw(L"%d× early · %.0f ms", c.early, c.earlyMs / c.early) : std::wstring();
+        auto late = c.late > 0 ? fmtw(L"%d× late · %.0f ms", c.late, c.lateMs / c.late) : std::wstring();
+        std::wstring gap = (c.early > 0 && c.late > 0) ? L"      " : L"";
+        runs(g, { { early, Face::Ui, 11.5f, col(C_EARLY) }, { gap, Face::Ui, 11.5f, col(C_FAINT) }, { late, Face::Ui, 11.5f, col(C_LATE) } },
+            box(PAD + 120.f, y + 8.f, W - 2 * PAD - 120.f, 18.f), RIGHT);
     }
-    hline(g, COACH_Y + COACH_H);
+
+    // the last one, big
+    RectF hero = box(PAD, y + 30.f, W - 2 * PAD, 40.f);
+    if (g_timing.empty()) {
+        text(g, L"–", Face::Light, 28.f, col(C_FAINT), box(hero.X, hero.Y, 30.f, hero.Height));
+        text(g, L"after a death: how early or late your click was", Face::Ui, 12.f, col(C_FAINT),
+            box(hero.X + 30.f, hero.Y + 2.f, hero.Width - 30.f, hero.Height));
+    }
+    else {
+        float ms = g_timing.back();
+        bool late = ms >= 0.f;
+        auto big = fmtw(L"%.0f", std::abs(ms));
+        auto unit = late ? std::wstring(L" ms late") : std::wstring(L" ms early");
+        auto ticks = fmtw(L"   %.0f tick%ls", std::max(1.f, std::round(std::abs(ms) * 0.24f)),
+            std::round(std::abs(ms) * 0.24f) > 1.f ? L"s" : L"");
+        uint32_t color = late ? C_LATE : C_EARLY;
+        runs(g, { { big, Face::Light, 30.f, col(color) }, { unit, Face::Ui, 14.f, col(color) }, { ticks, Face::Ui, 12.f, col(C_FAINT) } }, hero);
+        text(g, L"LAST DEATH", Face::Ui, 9.5f, col(C_FAINT), hero, RIGHT);
+    }
+
+    // the bar
+    float x0 = PAD + 4.f;
+    float x1 = W - PAD - 4.f;
+    float cx = (x0 + x1) / 2.f;
+    float by = y + 90.f;
+    fill(g, box(x0, by - 1.f, x1 - x0, 2.f), col(C_TRACK));
+    for (int t = -3; t <= 3; ++t) {
+        if (t == 0) continue;
+        float x = cx + (x1 - cx) * (t * 20.f / TIMING_RANGE);
+        line(g, x, by - 3.f, x, by + 3.f, col(C_TRACK), 1.f);
+    }
+    size_t n = g_timing.size();
+    for (size_t i = 0; i < n; ++i) {
+        float ms = g_timing[i];
+        float x = cx + (x1 - cx) * std::clamp(ms / TIMING_RANGE, -1.f, 1.f);
+        bool newest = i + 1 == n;
+        int alpha = newest ? 255 : 60 + static_cast<int>(150.f * static_cast<float>(i + 1) / static_cast<float>(n));
+        float half = newest ? 11.f : 7.f;
+        line(g, x, by - half, x, by + half, col(ms >= 0.f ? C_LATE : C_EARLY, alpha), newest ? 2.5f : 2.f);
+    }
+    line(g, cx, by - 10.f, cx, by + 10.f, col(C_TEXT, 200), 1.f); // on time
+    RectF labels = box(x0, by + 12.f, x1 - x0, 16.f);
+    spaced(g, L"EARLY", Face::Ui, 9.5f, col(C_EARLY, 190), labels, 1.3f);
+    spaced(g, L"LATE", Face::Ui, 9.5f, col(C_LATE, 190), labels, 1.3f, RIGHT);
+    text(g, fmtw(L"%.0f ms", TIMING_RANGE / 2.f), Face::Ui, 9.5f, col(C_FAINT), box(cx + (x1 - cx) / 2.f - 30.f, labels.Y, 60.f, 16.f), CENTER);
+    text(g, fmtw(L"%.0f ms", TIMING_RANGE / 2.f), Face::Ui, 9.5f, col(C_FAINT), box(cx - (x1 - cx) / 2.f - 30.f, labels.Y, 60.f, 16.f), CENTER);
+    hline(g, TIMING_Y + TIMING_H);
+}
+
+// Where in the level you die: one mark per level %, taller the more often.
+void paintDeaths(gp::Graphics& g) {
+    float y = DEATHS_Y;
+    bool hover = g_hover == HIT_DEATHS;
+    spaced(g, L"DEATHS", Face::Ui, 11.f, col(hover ? C_TEXT : C_MUTED), box(PAD, y + 8.f, 120.f, 18.f));
+    int worst = -1;
+    for (int p = 0; p <= 100; ++p) {
+        if (g_deaths[p] > 0 && (worst < 0 || g_deaths[p] >= g_deaths[worst])) worst = p;
+    }
+    if (g_deathCount > 0) {
+        auto total = fmtw(L"%d this level", g_deathCount);
+        auto most = worst >= 0 && g_deaths[worst] >= 2 ? fmtw(L"      most at %d%% · %d×", worst, g_deaths[worst]) : std::wstring();
+        runs(g, { { total, Face::Ui, 11.5f, col(C_MUTED) }, { most, Face::Ui, 11.5f, col(C_TEXT) } },
+            box(PAD + 120.f, y + 8.f, W - 2 * PAD - 120.f, 18.f), RIGHT);
+    }
+    float x0 = PAD + 4.f;
+    float x1 = W - PAD - 4.f;
+    float sy = y + 50.f;
+    for (int q = 0; q <= 4; ++q) {
+        float x = x0 + (x1 - x0) * q / 4.f;
+        line(g, x, sy, x, sy + 4.f, col(C_TRACK), 1.f);
+    }
+    fill(g, box(x0, sy - 1.f, x1 - x0, 2.f), col(C_TRACK));
+    for (int p = 0; p <= 100; ++p) {
+        int count = g_deaths[p];
+        if (count <= 0 || p == g_lastDeath) continue;
+        float x = x0 + (x1 - x0) * p / 100.f;
+        float h = 5.f + 3.f * std::min(count, 5);
+        line(g, x, sy - h, x, sy - 1.f, col(C_TEXT, std::min(255, 110 + 35 * count)), 2.f);
+    }
+    if (g_lastDeath >= 0 && g_lastDeath <= 100 && g_deaths[g_lastDeath] > 0) {
+        float x = x0 + (x1 - x0) * g_lastDeath / 100.f;
+        float h = 5.f + 3.f * std::min(g_deaths[g_lastDeath], 5);
+        line(g, x, sy - h, x, sy - 1.f, col(C_DANGER), 2.f);
+    }
+    RectF labels = box(x0, sy + 5.f, x1 - x0, 14.f);
+    text(g, L"0%", Face::Ui, 9.5f, col(C_FAINT), labels);
+    text(g, L"50%", Face::Ui, 9.5f, col(C_FAINT), labels, CENTER);
+    text(g, L"100%", Face::Ui, 9.5f, col(C_FAINT), labels, RIGHT);
+    hline(g, DEATHS_Y + DEATHS_H);
 }
 
 void paintModeLimits(gp::Graphics& g) {
@@ -569,7 +791,7 @@ void paintModeLimits(gp::Graphics& g) {
         if (hx > x0) fill(g, box(x0, y - 1.f, hx - x0, 2.f), col(capped ? C_FAINT : C_TEXT));
         circle(g, hx, y, 5.f, col(active ? 0xffffff : capped ? C_MUTED : C_TEXT));
     }
-    hline(g, TOGGLE_Y - 3.f);
+    hline(g, TOGGLE_Y - 4.f);
 }
 
 void paintSliders(gp::Graphics& g) {
@@ -604,25 +826,38 @@ void paintSliders(gp::Graphics& g) {
     }
 }
 
+// Two groups of switches, each a grid of two columns.
 void paintToggles(gp::Graphics& g) {
+    for (int group = 0; group < TOGGLE_GROUPS; ++group) {
+        spaced(g, GROUP_NAMES[group], Face::Ui, 11.f, col(C_MUTED), box(PAD, toggleGroupY(group) + 6.f, W - 2 * PAD, 18.f));
+    }
     for (int i = 0; i < TOGGLES; ++i) {
         RectF r = toggleRow(i);
         bool on = g_values.toggles[i];
         bool hover = g_hover == HIT_TOGGLE + i;
         if (hover) fill(g, box(r.X - 6.f, r.Y + 1.f, r.Width + 12.f, r.Height - 2.f), col(C_HOVER));
-        text(g, TOGGLE_NAMES[i], Face::Ui, 13.f, col(on || hover ? C_TEXT : C_MUTED), r);
-        text(g, on ? L"ON" : L"OFF", on ? Face::Semi : Face::Ui, 12.f, col(on ? C_TEXT : C_MUTED), r, RIGHT);
-        hline(g, r.Y + r.Height, i + 1 < TOGGLES ? C_DIVIDER : C_LINE);
+        text(g, TOGGLE_NAMES[i], Face::Ui, 13.f, col(on || hover ? C_TEXT : C_MUTED), box(r.X, r.Y, r.Width - 40.f, r.Height));
+        // a switch: white with the knob on the right when on
+        RectF sw = box(r.X + r.Width - 30.f, r.Y + (r.Height - 16.f) / 2.f, 30.f, 16.f);
+        pill(g, sw, col(on ? C_TEXT : C_TRACK));
+        circle(g, on ? sw.X + sw.Width - 8.f : sw.X + 8.f, sw.Y + 8.f, 5.f, col(on ? C_BG : C_MUTED));
+        bool lastRow = (i % TOGGLE_GROUP) / 2 == TOGGLE_GROUP / 2 - 1;
+        hseg(g, r.X, r.X + r.Width, r.Y + r.Height, lastRow ? C_LINE : C_DIVIDER);
     }
 }
 
 void paintItem(gp::Graphics& g, Item const& it, int age, RectF r) {
     int alpha = ageAlpha(age);
-    text(g, it.time, Face::Mono, 12.f, col(C_FAINT, alpha), box(r.X, r.Y, 62.f, r.Height));
-    float x = r.X + 62.f;
-    if (!it.note.empty()) {
-        uint32_t color = it.tone == Late ? C_LATE : it.tone == Early ? C_EARLY : it.tone == Bad ? C_DANGER : C_MUTED;
-        text(g, it.note, Face::Mono, 12.f, col(color, alpha), box(x, r.Y, r.X + r.Width - x, r.Height));
+    // a mark in the line's colour: white = held back, blue / orange = the coach, red = bad news
+    bool saved = it.note.empty();
+    if (saved || it.tone != Plain) {
+        fill(g, box(r.X, r.Y + 4.f, 2.f, r.Height - 8.f), col(saved ? C_TEXT : toneColor(it.tone), alpha));
+    }
+    float x = r.X + 9.f;
+    text(g, it.time, Face::Mono, 12.f, col(C_FAINT, alpha), box(x, r.Y, 60.f, r.Height));
+    x += 62.f;
+    if (!saved) {
+        text(g, it.note, Face::Mono, 12.f, col(toneColor(it.tone), alpha), box(x, r.Y, r.X + r.Width - x, r.Height));
         return;
     }
     auto const& s = it.save;
@@ -636,47 +871,88 @@ void paintItem(gp::Graphics& g, Item const& it, int age, RectF r) {
         box(x, r.Y, r.X + r.Width - x, r.Height));
 }
 
-// Newest attempt first, its newest line first.
+// Rows the log has in all (an attempt's header and each of its lines).
+int logRows() {
+    int rows = 0;
+    for (size_t ai = 0; ai < g_attempts.size(); ++ai) {
+        auto const& a = g_attempts[ai];
+        if (a.number > 0 && ai > 0) rows++;
+        rows += static_cast<int>(a.items.size());
+    }
+    return rows;
+}
+
+// Newest attempt first, its newest line first. The mouse wheel scrolls it.
 void paintLog(gp::Graphics& g) {
     RectF area = logRect();
+    constexpr float LH = 18.f;
     bool current = !g_attempts.empty() && g_attempts.front().number > 0;
     std::wstring title = current ? fmtw(L"LOG · ATTEMPT %d", g_attempts.front().number) : std::wstring(L"LOG");
     spaced(g, title, Face::Ui, 11.f, col(C_MUTED), box(area.X, area.Y, area.Width, 20.f));
+    // how often the ghost's "you die / you're fine" came true
+    if (g_coach.calls > 0) {
+        text(g, fmtw(L"ghost right %d of %d", g_coach.callHits, g_coach.calls), Face::Ui, 11.f, col(C_FAINT),
+            box(area.X, area.Y, area.Width, 20.f), RIGHT);
+    }
 
-    constexpr float LH = 18.f;
-    float y = area.Y + 24.f;
+    float top = area.Y + 26.f;
     float bottom = area.Y + area.Height;
+    int total = logRows();
+    int fits = std::max(1, static_cast<int>((bottom - top) / LH));
+    g_logScroll = std::clamp(g_logScroll, 0, std::max(0, total - fits / 2));
+
+    float y = top;
+    int row = 0; // rows passed so far
     bool any = false;
-    for (size_t ai = 0; ai < g_attempts.size(); ++ai) {
+    bool full = false;
+    for (size_t ai = 0; ai < g_attempts.size() && !full; ++ai) {
         auto const& a = g_attempts[ai];
         int age = static_cast<int>(ai);
         if (a.number > 0 && ai > 0) {
-            if (y + 8.f + LH + (a.items.empty() ? 0.f : LH) > bottom) return;
-            y += 8.f;
-            RectF hr = box(area.X, y, area.Width, LH);
-            spaced(g, fmtw(L"ATTEMPT %d", a.number), Face::Ui, 11.f, col(C_FAINT), hr);
-            if (a.death >= 0) text(g, fmtw(L"died at %d%%", a.death), Face::Ui, 11.f, col(C_DANGER, 200), hr, RIGHT);
-            y += LH;
+            if (row++ >= g_logScroll) {
+                float gap = any ? 6.f : 0.f;
+                if (y + gap + LH > bottom) break;
+                y += gap;
+                RectF hr = box(area.X, y, area.Width - 8.f, LH);
+                spaced(g, fmtw(L"ATTEMPT %d", a.number), Face::Ui, 11.f, col(C_FAINT), hr);
+                if (a.death >= 0) text(g, fmtw(L"died at %d%%", a.death), Face::Ui, 11.f, col(C_DANGER, 200), hr, RIGHT);
+                y += LH;
+                any = true;
+            }
         }
         for (auto it = a.items.rbegin(); it != a.items.rend(); ++it) {
-            if (y + LH > bottom) return;
-            paintItem(g, *it, age, box(area.X, y, area.Width, LH));
+            if (row++ < g_logScroll) continue;
+            if (y + LH > bottom) {
+                full = true;
+                break;
+            }
+            paintItem(g, *it, g_logScroll > 0 ? 0 : age, box(area.X, y, area.Width - 8.f, LH));
             y += LH;
             any = true;
         }
     }
-    if (!any && y + LH <= bottom) {
-        text(g, L"Nothing yet: held-back clicks and what the coach finds show up here", Face::Ui, 12.f, col(C_MUTED),
-            box(area.X, y, area.Width, LH));
+    if (total == 0) {
+        text(g, L"Nothing yet. Held-back clicks and what the coach finds show up here.", Face::Ui, 12.f, col(C_FAINT),
+            box(area.X, top, area.Width, LH));
+    }
+    // a scroll bar once there's more than fits
+    if (total > fits) {
+        float trackH = bottom - top;
+        float thumbH = std::max(24.f, trackH * fits / static_cast<float>(total));
+        float t = static_cast<float>(g_logScroll) / static_cast<float>(std::max(1, total - fits / 2));
+        float ty = top + (trackH - thumbH) * std::clamp(t, 0.f, 1.f);
+        fill(g, box(area.X + area.Width - 2.f, top, 2.f, trackH), col(C_DIVIDER));
+        fill(g, box(area.X + area.Width - 2.f, ty, 2.f, thumbH), col(g_logScroll > 0 || g_hover == HIT_LOG ? C_MUTED : C_TRACK));
     }
 }
 
 void paintFooter(gp::Graphics& g) {
     RectF r = footerRect();
+    hline(g, r.Y - 9.f);
     auto h = help();
     gp::SolidBrush brush(col(h.empty() ? C_FAINT : C_TEXT));
-    std::wstring_view s = h.empty() ? std::wstring_view(IDLE_HELP) : std::wstring_view(h);
-    g.DrawString(s.data(), static_cast<INT>(s.size()), font(Face::Ui, h.empty() ? 12.f : 12.5f), r, g_wrap, &brush);
+    std::wstring_view s = h.empty() ? std::wstring_view(g_tab == TAB_LIVE ? LIVE_HELP : SETTINGS_HELP) : std::wstring_view(h);
+    g.DrawString(s.data(), static_cast<INT>(s.size()), font(Face::Ui, h.empty() ? 11.5f : 12.f), r, g_wrap, &brush);
 }
 
 void paintScene(gp::Graphics& g) {
@@ -689,12 +965,18 @@ void paintScene(gp::Graphics& g) {
         g.DrawRectangle(&pen, box(0, 0, W - 1.f, H - 1.f));
     }
     paintTitle(g);
-    paintStats(g);
-    paintCoach(g);
-    paintSliders(g);
-    paintModeLimits(g);
-    paintToggles(g);
-    paintLog(g);
+    paintTabs(g);
+    if (g_tab == TAB_LIVE) {
+        paintStats(g);
+        paintTiming(g);
+        paintDeaths(g);
+        paintLog(g);
+    }
+    else {
+        paintSliders(g);
+        paintModeLimits(g);
+        paintToggles(g);
+    }
     paintFooter(g);
 }
 
@@ -739,6 +1021,7 @@ void addItem(Item&& item) {
     auto& a = g_attempts.front();
     a.items.push_back(std::move(item));
     if (a.items.size() > MAX_ITEMS) a.items.erase(a.items.begin());
+    if (g_logScroll > 0) g_logScroll++; // keep what you scrolled to in place
 }
 
 void handleEvent(Event& e) {
@@ -747,6 +1030,12 @@ void handleEvent(Event& e) {
             if (e.newLevel) {
                 g_levelSaves = 0;
                 g_levelMs = 0.0;
+                g_coach = {};
+                g_timing.clear();
+                for (auto& d : g_deaths) d = 0;
+                g_deathCount = 0;
+                g_lastDeath = -1;
+                g_logScroll = 0;
             }
             // an attempt where nothing happened is reused instead of stacking headers
             if (!g_attempts.empty() && g_attempts.front().items.empty()) {
@@ -760,11 +1049,17 @@ void handleEvent(Event& e) {
                 a.number = e.number;
                 g_attempts.push_front(std::move(a));
                 while (g_attempts.size() > MAX_ATTEMPTS) g_attempts.pop_back();
+                if (g_logScroll > 0) g_logScroll++;
             }
             break;
         case Event::Death:
             if (!g_attempts.empty() && g_attempts.front().number > 0 && g_attempts.front().death < 0) {
                 g_attempts.front().death = e.number;
+            }
+            if (e.number >= 0 && e.number <= 100) {
+                g_deaths[e.number]++;
+                g_deathCount++;
+                g_lastDeath = e.number;
             }
             break;
         case Event::Saved:
@@ -782,6 +1077,10 @@ void handleEvent(Event& e) {
             break;
         case Event::CoachStats:
             g_coach = e.coach;
+            break;
+        case Event::Timing:
+            g_timing.push_back(e.ms);
+            if (g_timing.size() > TIMING_MAX) g_timing.erase(g_timing.begin());
             break;
     }
 }
@@ -827,7 +1126,7 @@ void place(HWND wnd, Values const& v) {
     int w = r.right - r.left;
     int h = r.bottom - r.top;
     if (v.hasPos && isOnScreen(v.x, v.y)) {
-        // keep the bottom on its screen (the window got taller in 3.0)
+        // keep the bottom on its screen
         int y = v.y;
         POINT corner { v.x, v.y };
         MONITORINFO info {};
@@ -881,6 +1180,7 @@ void applyLayout(HWND wnd, bool force = false) {
 void showWindow(HWND wnd, Values* values) {
     g_values = *values;
     delete values;
+    if (!g_placed) g_tab = std::clamp(g_values.tab, 0, TABS - 1); // the tab you left it on
     applyLayout(wnd, !g_placed);
     if (!g_placed) {
         place(wnd, g_values);
@@ -997,7 +1297,7 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
 
         case WM_SETCURSOR:
-            if (LOWORD(lParam) == HTCLIENT && g_hover != HIT_NONE) {
+            if (LOWORD(lParam) == HTCLIENT && clickable(g_hover)) {
                 SetCursor(LoadCursorW(nullptr, MAKEINTRESOURCEW(32649))); // hand
                 return TRUE;
             }
@@ -1059,6 +1359,13 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             else if (hit == HIT_MINIMIZE) {
                 ShowWindow(wnd, SW_SHOWMINNOACTIVE);
             }
+            else if (within(hit, HIT_TAB, TABS)) {
+                if (g_tab != hit - HIT_TAB) {
+                    g_tab = hit - HIT_TAB;
+                    saveTab();
+                    InvalidateRect(wnd, nullptr, FALSE);
+                }
+            }
             else if (within(hit, HIT_TOGGLE, TOGGLES)) {
                 g_values.toggles[hit - HIT_TOGGLE] = !g_values.toggles[hit - HIT_TOGGLE];
                 InvalidateRect(wnd, nullptr, FALSE);
@@ -1096,7 +1403,12 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             POINT pt { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
             ScreenToClient(wnd, &pt);
             int hit = hitTest(pt.x / g_scale, pt.y / g_scale);
-            if (within(hit, HIT_SLIDER, SLIDERS)) {
+            if (hit == HIT_LOG) {
+                // wheel up = towards the newest line
+                g_logScroll = std::max(0, g_logScroll - steps * 3);
+                InvalidateRect(wnd, nullptr, FALSE);
+            }
+            else if (within(hit, HIT_SLIDER, SLIDERS)) {
                 int i = hit - HIT_SLIDER;
                 g_focus = i;
                 setSlider(wnd, i, g_values.sliders[i] + steps);
@@ -1113,11 +1425,13 @@ LRESULT CALLBACK windowProc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     return 0;
                 case VK_LEFT:
                 case VK_DOWN:
+                    if (g_tab != TAB_SETTINGS) return 0;
                     setSlider(wnd, g_focus, g_values.sliders[g_focus] - 1);
                     save();
                     return 0;
                 case VK_RIGHT:
                 case VK_UP:
+                    if (g_tab != TAB_SETTINGS) return 0;
                     setSlider(wnd, g_focus, g_values.sliders[g_focus] + 1);
                     save();
                     return 0;
@@ -1291,6 +1605,14 @@ void coach(Coach const& stats) {
     post(e);
 }
 
+void timing(double ms) {
+    if (!g_window.load()) return;
+    auto e = new Event;
+    e->type = Event::Timing;
+    e->ms = static_cast<float>(ms);
+    post(e);
+}
+
 void saved(Save const& save) {
     if (!g_window.load()) return;
     auto e = new Event;
@@ -1338,6 +1660,7 @@ void prepare() {}
 void sync() {}
 void note(std::string const&, int) {}
 void coach(Coach const&) {}
+void timing(double) {}
 void saved(Save const&) {}
 void attempt(int, bool) {}
 void death(int) {}

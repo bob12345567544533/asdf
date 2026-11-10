@@ -5,7 +5,9 @@ When you click a little too early and a hidden ghost run says that click kills y
 After a death, the **coach** plays your last moments again with the click a little earlier / later and tells you how far off you were ("click 13 ms late").
 
 - **F6** cycles the buffer: 2 -> 4 -> 8 -> 16 ticks -> off (wave stops at 8).
-- **F7** shows the window (hidden from screen capture): buffer range, randomize, per-mode limits, switches, saves per attempt and per level, the coach's numbers, and a log of every held-back input and every coach line.
+- **F7** shows the window (hidden from screen capture). **LIVE** tab: your last death's timing in big, a bar of every death from "too early" to "too late", where in the level you die, and a scrolling log. **SETTINGS** tab: buffer range, randomize, per-mode limits and every switch.
+
+v3.1.0: new window (LIVE / SETTINGS tabs, timing bar, death map, every switch in the window, scrolling log).
 
 v3.0.0 is a full rewrite:
 - **Coach**: after each death, how early or late your click / release was, in ms and ticks. Works with the buffer switched off too, so you can practise raw and still see your timing. Per level: your average early / late, and the spot you die at most.

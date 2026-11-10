@@ -136,6 +136,7 @@ void finish() {
             double total = ms + j.lateAt[want] * 1000.0;
             g_stats.late++;
             g_stats.lateMs += total;
+            window::timing(total);
             say(fmt::format("{}% {} {:.0f} ms late", percent, what, total), window::Late);
         }
         else {
@@ -145,6 +146,7 @@ void finish() {
     else if (j.late) {
         g_stats.late++;
         g_stats.lateMs += ms;
+        window::timing(ms);
         float moved = j.suspect >= 0 && j.suspect < static_cast<int>(j.moved.size()) ? j.moved[j.suspect] : 0.f;
         std::string tail = moved > 0.f ? fmt::format(", buffer had added +{:.1f}", moved) : "";
         say(fmt::format("{}% {} {:.0f} ms late ({}){}", percent, what, ms, tickWord(j.ticks), tail), window::Late);
@@ -152,6 +154,7 @@ void finish() {
     else {
         g_stats.early++;
         g_stats.earlyMs += ms;
+        window::timing(-ms);
         std::string tail = j.death.limit > 0 && j.ticks > j.death.limit ? fmt::format(", limit {}", j.death.limit) : "";
         say(fmt::format("{}% {} {:.0f} ms early ({}){}", percent, what, ms, tickWord(j.ticks), tail), window::Early);
     }
@@ -330,6 +333,7 @@ void died(PlayLayer* layer, Death const& death) {
         if (!pressedSince) {
             g_stats.early++;
             g_stats.earlyMs += g_miss.needed * TICK_MS;
+            window::timing(-g_miss.needed * TICK_MS);
             g_miss = {};
             publish();
             return;

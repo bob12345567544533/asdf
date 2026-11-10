@@ -41,5 +41,7 @@ struct Coach {
     int callHits = 0;     // ... and was right
 };
 void coach(Coach const& stats);
+// One death the coach worked out: how far off the input was, in ms (below 0 = too early).
+void timing(double ms);
 
 } // namespace pb::window
