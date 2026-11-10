@@ -23,21 +23,8 @@ bool g_dead = false;
 bool g_stopped = false;
 bool g_held[2] { false, false };
 bool g_ready[2] { false, false }; // pressed since the last orb it used (a click an orb can still take)
-std::vector<GameObject*> g_used; // pads / portals the ghost already used this run
+std::vector<GameObject*> g_used; // pads / portals / orbs the ghost already used this run
 RunInfo g_info;
-
-// How hard GD bumps the player for each pad type, learned from the real player
-// (so the ghost bumps exactly like the game does). Saved between sessions.
-std::unordered_map<int, float> g_bump;
-bool g_bumpLoaded = false;
-
-// What each orb does to the player, learned from the real player: the velocity it
-// leaves you with and whether it flips gravity, per orb type / mode / size / gravity.
-struct OrbEffect {
-    double velocity = 0.0;
-    bool flips = false;
-};
-std::unordered_map<std::string, OrbEffect> g_orbs;
 
 int modeKey(PlayerObject* p) {
     if (p->m_isShip) return 1;
@@ -49,6 +36,59 @@ int modeKey(PlayerObject* p) {
     if (p->m_isSwing) return 7;
     return 0;
 }
+
+// ---------------------------------------------------------------------------
+// Pads
+// ---------------------------------------------------------------------------
+
+// How hard a pad bumps the player: the game's own table (yellow 1, pink and red
+// by gamemode / size).
+float bumpFor(PlayerObject* p, GameObjectType type) {
+    bool mini = p->m_vehicleSize < 1.f;
+    if (type == GameObjectType::PinkJumpPad) {
+        if (p->m_isShip) return 0.35f;
+        if (p->m_isBird) return 0.4f;
+        if (p->m_isBall || p->m_isSpider) return 0.7f;
+        return 0.65f;
+    }
+    if (type == GameObjectType::RedJumpPad) {
+        if (p->m_isShip) return mini ? 0.95f : 0.63f;
+        if (p->m_isBird) return mini ? 0.98f : 0.6f;
+        return 1.25f;
+    }
+    return 1.f;
+}
+
+// ... and what the game really used for the real player this session (wins over
+// the table if they ever differ).
+std::unordered_map<int, float> g_bumpSeen;
+
+int bumpKey(PlayerObject* p, int objectType) {
+    return objectType * 64 + modeKey(p) * 2 + (p->m_vehicleSize < 1.f ? 1 : 0);
+}
+
+bool jumpPad(int objectType) {
+    switch (static_cast<GameObjectType>(objectType)) {
+        case GameObjectType::YellowJumpPad:
+        case GameObjectType::PinkJumpPad:
+        case GameObjectType::RedJumpPad:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Orbs
+// ---------------------------------------------------------------------------
+
+// What each orb does to the player, learned from the real player: the velocity it
+// leaves you with and whether it flips gravity, per orb type / mode / size / gravity.
+struct OrbEffect {
+    double velocity = 0.0;
+    bool flips = false;
+};
+std::unordered_map<std::string, OrbEffect> g_orbs;
 
 std::string orbKey(GameObject* orb, PlayerObject* p, bool upsideDown) {
     return fmt::format("orb-{}-{}-{}-{}", static_cast<int>(orb->m_objectType), modeKey(p), p->m_vehicleSize < 1.f ? 1 : 0,
@@ -82,6 +122,10 @@ OrbEffect const* findOrb(std::string const& key) {
     return &(g_orbs[key] = e);
 }
 
+// ---------------------------------------------------------------------------
+// Moving objects
+// ---------------------------------------------------------------------------
+
 // Objects around the player and how fast they move (units per unit of step time).
 struct Track {
     double x = 0.0;
@@ -93,6 +137,62 @@ struct Track {
 std::unordered_map<GameObject*, Track> g_tracks;
 double g_lastClock = 0.0;
 
+// Moves the objects that are moving to where they'll be during a ghost step, and
+// puts every one of them back exactly as it was when the run ends.
+class Movers {
+public:
+    struct Moved {
+        GameObject* object;
+        CCPoint node;
+        double x;
+        double y;
+        CCPoint last;
+        double vx;
+        double vy;
+    };
+
+    Movers(bool on, float dt) : m_dt(dt) {
+        if (!on || g_tracks.empty()) return;
+        for (auto& [object, t] : g_tracks) {
+            if (!object || t.clock < g_lastClock - 1.0) continue; // not seen around the player lately
+            if (std::abs(t.vx) < 1e-4 && std::abs(t.vy) < 1e-4) continue;
+            m_moved.push_back({ object, object->getPosition(), object->m_positionX, object->m_positionY,
+                                object->m_lastPosition, t.vx, t.vy });
+        }
+    }
+    ~Movers() { restore(); }
+
+    // Positions `steps` from now (negative = in the past).
+    void place(double steps) {
+        double t = steps * static_cast<double>(m_dt);
+        for (auto& m : m_moved) {
+            m.object->setPosition({ static_cast<float>(m.node.x + m.vx * t), static_cast<float>(m.node.y + m.vy * t) });
+        }
+    }
+
+    void restore() {
+        for (auto& m : m_moved) {
+            m.object->setPosition(m.node);
+            m.object->m_positionX = m.x;
+            m.object->m_positionY = m.y;
+            m.object->m_lastPosition = m.last;
+            m.object->setObjectRectDirty(true);
+            m.object->setOrientedRectDirty(true);
+        }
+        m_moved.clear();
+    }
+
+    bool any() const { return !m_moved.empty(); }
+
+private:
+    float m_dt;
+    std::vector<Moved> m_moved;
+};
+
+// ---------------------------------------------------------------------------
+// Copying the player
+// ---------------------------------------------------------------------------
+
 // Fields copyAttributes leaves out (GD 2.2081 Windows; same set the original
 // mod copied): slope / ground state and a few movement values.
 template <class T>
@@ -100,18 +200,18 @@ void copyRaw(PlayerObject* to, PlayerObject* from, size_t offset) {
     std::memcpy(reinterpret_cast<char*>(to) + offset, reinterpret_cast<char const*>(from) + offset, sizeof(T));
 }
 
-void mirror(PlayerObject* ghost, PlayerObject* real) {
-    ghost->setVisible(false);
-    ghost->copyAttributes(real);
-    ghost->setScale(real->getScale());
-    ghost->setContentSize(real->getContentSize());
-    copyRaw<float>(ghost, real, 0x2fc);
-    copyRaw<float>(ghost, real, 0x300);
-    copyRaw<float>(ghost, real, 0xb84);
-    copyRaw<bool>(ghost, real, 0x9c1);
-    copyRaw<bool>(ghost, real, 0x9bf);
-    copyRaw<float>(ghost, real, 0x9f0);
-    copyRaw<float>(ghost, real, 0x9f4);
+void mirror(PlayerObject* to, PlayerObject* from) {
+    to->setVisible(false);
+    to->copyAttributes(from);
+    to->setScale(from->getScale());
+    to->setContentSize(from->getContentSize());
+    copyRaw<float>(to, from, 0x2fc);
+    copyRaw<float>(to, from, 0x300);
+    copyRaw<float>(to, from, 0xb84);
+    copyRaw<bool>(to, from, 0x9c1);
+    copyRaw<bool>(to, from, 0x9bf);
+    copyRaw<float>(to, from, 0x9f0);
+    copyRaw<float>(to, from, 0x9f4);
 }
 
 void press(int i, bool down) {
@@ -148,69 +248,44 @@ bool used(GameObject* object) {
     return std::find(g_used.begin(), g_used.end(), object) != g_used.end();
 }
 
-void loadBumps() {
-    if (g_bumpLoaded) return;
-    g_bumpLoaded = true;
-    auto mod = Mod::get();
-    for (auto type : { GameObjectType::YellowJumpPad, GameObjectType::PinkJumpPad, GameObjectType::RedJumpPad }) {
-        auto key = fmt::format("bump-{}", static_cast<int>(type));
-        if (mod->hasSavedValue(key)) g_bump[static_cast<int>(type)] = mod->getSavedValue<float>(key);
+// ---------------------------------------------------------------------------
+// Snapshots
+// ---------------------------------------------------------------------------
+
+constexpr int SNAPSHOTS = 8;
+// Never part of the scene: the snapshot players (and the particles they come
+// with) are only ever copied to and from, so they cost nothing while you play.
+CCLayer* g_shelf = nullptr;
+Snapshot g_snaps[SNAPSHOTS];
+bool g_snapValid[SNAPSHOTS] {};
+int g_snapNext = 0;
+
+void makeSnapshots(PlayLayer* layer) {
+    g_shelf = CCLayer::create();
+    if (!g_shelf) return;
+    g_shelf->retain();
+    for (int i = 0; i < SNAPSHOTS; ++i) {
+        auto holder = PlayerObject::create(1, 1, layer, g_shelf, true);
+        if (!holder) {
+            // all or nothing
+            for (auto& s : g_snaps) s = {};
+            g_shelf->release();
+            g_shelf = nullptr;
+            return;
+        }
+        holder->setVisible(false);
+        g_shelf->addChild(holder);
+        g_snaps[i] = {};
+        g_snaps[i].player = holder;
+        g_snapValid[i] = false;
     }
+    g_snapNext = 0;
 }
 
-// Moves the objects that are moving to where they'll be during a ghost step, and
-// puts every one of them back exactly as it was when the run ends.
-class Movers {
-public:
-    struct Moved {
-        GameObject* object;
-        CCPoint node;
-        double x;
-        double y;
-        CCPoint last;
-        double vx;
-        double vy;
-    };
+// ---------------------------------------------------------------------------
+// One run
+// ---------------------------------------------------------------------------
 
-    Movers(bool on, float dt) : m_dt(dt) {
-        if (!on || g_tracks.empty()) return;
-        for (auto& [object, t] : g_tracks) {
-            if (!object || t.clock < g_lastClock - 1.0) continue; // not seen around the player lately
-            if (std::abs(t.vx) < 1e-4 && std::abs(t.vy) < 1e-4) continue;
-            m_moved.push_back({ object, object->getPosition(), object->m_positionX, object->m_positionY,
-                                object->m_lastPosition, t.vx, t.vy });
-        }
-    }
-    ~Movers() { restore(); }
-
-    // Positions `steps` after the input arrived.
-    void place(double steps) {
-        double t = steps * static_cast<double>(m_dt);
-        for (auto& m : m_moved) {
-            m.object->setPosition({ static_cast<float>(m.node.x + m.vx * t), static_cast<float>(m.node.y + m.vy * t) });
-        }
-    }
-
-    void restore() {
-        for (auto& m : m_moved) {
-            m.object->setPosition(m.node);
-            m.object->m_positionX = m.x;
-            m.object->m_positionY = m.y;
-            m.object->m_lastPosition = m.last;
-            m.object->setObjectRectDirty(true);
-            m.object->setOrientedRectDirty(true);
-        }
-        m_moved.clear();
-    }
-
-    bool any() const { return !m_moved.empty(); }
-
-private:
-    float m_dt;
-    std::vector<Moved> m_moved;
-};
-
-// Ends a run and gives back its result.
 struct RunGuard {
     RunGuard() {
         g_running = true;
@@ -224,84 +299,62 @@ struct RunGuard {
     ~RunGuard() { g_running = false; }
 };
 
-} // namespace
-
-void create(PlayLayer* layer) {
-    destroy();
-    clearTracks();
-    loadBumps();
-    if (!layer || !layer->m_objectLayer) return;
-    g_ghost[0] = make(layer);
-    g_ghost[1] = make(layer);
-}
-
-void destroy() {
-    // Just let go: the level owns the node and cleans it up with everything else
-    // (taking it out by hand runs PlayerObject's exit code, best left alone).
-    for (auto& ghost : g_ghost) {
-        if (!ghost) continue;
-        ghost->release();
-        ghost = nullptr;
-    }
-    g_running = false;
-    clearTracks();
-}
-
-bool ready() {
-    return g_ghost[0] != nullptr;
-}
-
-Result run(PlayLayer* layer, Setup const& s, double delay, bool down, int horizon) {
+// `judge`: the input after which steps are counted (-1 = from the very start).
+// `landing`: cube-like modes count a jump that lands and stays down as safe.
+Result simulate(PlayLayer* layer, Setup const& s, Input const* inputs, int count, int judge, int horizon, bool landing) {
     Result result;
     if (!layer || !s.p1 || !g_ghost[0]) {
         result.survived = horizon;
         return result;
     }
     bool dual = s.p2 && g_ghost[1];
-    int count = dual ? 2 : 1;
-    PlayerObject* real[2] { s.p1, s.p2 };
-
-    bool now = delay < 0.0;
-    int inputStep = now ? -1 : static_cast<int>(std::floor(delay + 1e-6));
-    float frac = now ? 0.f : static_cast<float>(delay - inputStep);
-    if (frac < 0.01f) frac = 0.f;
+    int players = dual ? 2 : 1;
+    PlayerObject* from[2] { s.p1, s.p2 };
     float rem = std::clamp(s.remainder, 0.f, 0.999f);
     if (rem < 0.01f) rem = 0.f;
 
     RunGuard guard;
     Movers movers(config().movingObjects, s.dt);
     g_info.moved = movers.any();
-    for (int i = 0; i < count; ++i) {
+
+    int next = 0; // the next input to go in
+    bool applied = judge < 0;
+    bool judgeDown = judge >= 0 && judge < count && inputs[judge].down;
+    bool startsNow = count > 0 && inputs[0].at < 0.0;
+    for (int i = 0; i < players; ++i) {
         if (s.fresh) freshen(g_ghost[i]);
-        mirror(g_ghost[i], real[i]);
-        if (now) {
-            press(i, down);
-            if (s.keepHolding) g_ready[i] = false; // still the same hold, not a new click
+        mirror(g_ghost[i], from[i]);
+        if (startsNow) {
+            press(i, inputs[0].down);
         }
-        else if (delay > 0.0 || rem > 0.f) {
-            press(i, !down);     // the button as it is now, until the input
-            g_ready[i] = false;  // a hold from before the check isn't a click an orb can take
+        else {
+            press(i, s.heldBefore); // the button as it is now, until the first input
+            g_ready[i] = false;     // a hold from before the run isn't a click an orb can take
         }
     }
-    bool applied = now;
-    double t = 0.0; // steps since the input arrived (for moving objects)
+    if (startsNow) {
+        if (judge == 0) applied = true;
+        next = 1;
+    }
 
-    // per player: cube-like modes count a jump that lands and stays down as safe
+    double t = -s.stepsAgo; // steps from now (for moving objects)
+
+    // per player: a jump that lands and stays down
     int grounded[2] {};
     int airborne[2] {};
     bool clear[2] {};
     int sincePress = 0;
-    auto afterInputStep = [&]() -> bool { // true = the run is over
+    auto counted = [&]() -> bool { // one more step lived; true = the run is over
         result.survived++;
         if (s.record && static_cast<int>(s.record->size()) < s.recordMax) s.record->push_back(g_ghost[0]->getPosition());
         // your usual tap: let go when you normally would
-        if (down && s.tapSteps > 0 && ++sincePress == s.tapSteps) {
-            for (int i = 0; i < count; ++i) press(i, false);
+        if (judge >= 0 && judgeDown && s.tapSteps > 0 && ++sincePress == s.tapSteps) {
+            for (int i = 0; i < players; ++i) press(i, false);
         }
         if (result.survived >= horizon) return true;
-        if (s.flying) return false;
+        if (!landing || s.flying) return false;
         bool allClear = true;
-        for (int i = 0; i < count; ++i) {
+        for (int i = 0; i < players; ++i) {
             if (!clear[i]) {
                 if (!g_ghost[i]->m_isOnGround) {
                     airborne[i]++;
@@ -320,13 +373,22 @@ Result run(PlayLayer* layer, Setup const& s, double delay, bool down, int horizo
         }
         return false;
     };
-    // collisions at the end of a step; false = the run ended (death / something it can't use)
-    auto collide = [&](bool beforeInput) {
-        for (int i = 0; i < count; ++i) {
+    auto death = [&](int step) {
+        result.died = true;
+        result.deathStep = step;
+        result.diedBeforeInput = !applied;
+    };
+    // the end of a step: collisions, then rotation, like the game. false = the run ended
+    auto finish = [&](int step, float rotation) {
+        if (g_dead) {
+            death(step);
+            return false;
+        }
+        for (int i = 0; i < players; ++i) {
             clearLogs(g_ghost[i]);
             layer->checkCollisions(g_ghost[i], s.dt, false);
             if (g_dead) {
-                result.diedBeforeInput = beforeInput;
+                death(step);
                 return false;
             }
         }
@@ -334,62 +396,100 @@ Result run(PlayLayer* layer, Setup const& s, double delay, bool down, int horizo
             result.hitStop = true;
             return false;
         }
+        for (int i = 0; i < players; ++i) g_ghost[i]->updateRotation(rotation);
         return true;
     };
 
-    // the rest of the step your input arrived in
+    // the rest of the step the input arrived in
     if (rem > 0.f) {
         t += rem;
         movers.place(t);
-        for (int i = 0; i < count; ++i) {
-            g_ghost[i]->update(s.dt * rem);
-            g_ghost[i]->updateRotation(s.dt * rem);
-        }
-        if (g_dead) {
-            result.diedBeforeInput = !applied;
-            return result;
-        }
-        if (!collide(!applied)) return result;
-        if (applied && afterInputStep()) return result;
+        for (int i = 0; i < players; ++i) g_ghost[i]->update(s.dt * rem);
+        if (!finish(-1, s.dt * rem)) return result;
+        if (applied && counted()) return result;
     }
 
-    bool pressNext = false; // the split wasn't possible: the input goes in at the start of the next step
-    int cap = horizon + std::max(inputStep, 0) + 2;
+    double lastAt = count > 0 ? std::max(0.0, inputs[count - 1].at) : 0.0;
+    int cap = horizon + static_cast<int>(lastAt) + 3;
     for (int step = 0; step < cap; ++step) {
         t += 1.0;
         movers.place(t);
-        bool pressing = !applied && (pressNext || (step == inputStep && frac == 0.f));
-        bool splitting = !applied && !pressing && step == inputStep && frac > 0.f;
-        if (splitting && (dual || !splittable(g_ghost[0]))) {
-            splitting = false;
-            pressNext = true; // same fallback as the real game: whole step now, input at the next one
-        }
-        for (int i = 0; i < count; ++i) {
-            if (pressing) press(i, down);
-            if (splitting) {
-                bool startedOnGround = g_ghost[i]->m_isOnGround;
-                g_ghost[i]->update(s.dt * frac);
-                splitCollide(layer, g_ghost[i], startedOnGround, s.dt);
-                press(i, down);
-                g_ghost[i]->update(s.dt * (1.f - frac));
+        // same rule as the real game: only some states let an input land mid-step
+        bool canSplit = !dual && splittable(g_ghost[0]);
+        bool startedOnGround = g_ghost[0]->m_isOnGround;
+        CCPoint startPos = g_ghost[0]->getPosition();
+        float cursor = 0.f; // how much of this step has run
+        while (next < count && inputs[next].at < step + 1.0 - 1e-6) {
+            double at = inputs[next].at;
+            float frac = at <= step ? 0.f : static_cast<float>(at - step); // left over from an earlier step: right away
+            if (frac < 0.01f) frac = 0.f;
+            if (frac > cursor + 1e-4f) {
+                if (!canSplit) break; // whole step now, the input at the start of the next one
+                g_ghost[0]->update(s.dt * (frac - cursor));
+                if (g_dead) {
+                    death(step);
+                    return result;
+                }
+                splitCollide(layer, g_ghost[0], startedOnGround, s.dt);
+                cursor = frac;
             }
-            else {
-                g_ghost[i]->update(s.dt);
-            }
-            g_ghost[i]->updateRotation(s.dt);
+            for (int i = 0; i < players; ++i) press(i, inputs[next].down);
+            if (next == judge) applied = true;
+            ++next;
         }
-        if (pressing || splitting) {
-            applied = true;
-            pressNext = false;
-        }
-        if (g_dead) {
-            result.diedBeforeInput = !applied;
-            return result;
-        }
-        if (!collide(!applied)) return result;
-        if (applied && afterInputStep()) return result;
+        for (int i = 0; i < players; ++i) g_ghost[i]->update(s.dt * (1.f - cursor));
+        if (!finish(step, s.dt)) return result;
+        if (cursor > 0.f) g_ghost[0]->m_lastPosition = startPos; // as after a real split step
+        if (applied && counted()) return result;
     }
     return result;
+}
+
+} // namespace
+
+void create(PlayLayer* layer, bool withSnapshots) {
+    destroy(false);
+    clearTracks();
+    g_bumpSeen.clear();
+    if (!layer || !layer->m_objectLayer) return;
+    g_ghost[0] = make(layer);
+    g_ghost[1] = make(layer);
+    if (withSnapshots && g_ghost[0]) makeSnapshots(layer);
+}
+
+void destroy(bool layerAlive) {
+    // Just let go: the level owns the node and cleans it up with everything else
+    // (taking it out by hand runs PlayerObject's exit code, best left alone).
+    for (auto& ghost : g_ghost) {
+        if (!ghost) continue;
+        ghost->release();
+        ghost = nullptr;
+    }
+    // The snapshot players are ours. If their level is already gone, leave them be
+    // rather than destroy players whose level no longer exists.
+    if (g_shelf && layerAlive) g_shelf->release();
+    g_shelf = nullptr;
+    for (auto& s : g_snaps) s = {};
+    for (auto& v : g_snapValid) v = false;
+    g_running = false;
+    clearTracks();
+}
+
+bool ready() {
+    return g_ghost[0] != nullptr;
+}
+
+Result run(PlayLayer* layer, Setup const& setup, double delay, bool down, int horizon) {
+    Input input { delay < 0.0 ? NOW : delay, down };
+    return simulate(layer, setup, &input, 1, 0, horizon, true);
+}
+
+Result coast(PlayLayer* layer, Setup const& setup, int horizon) {
+    return simulate(layer, setup, nullptr, 0, -1, horizon, false);
+}
+
+Result replay(PlayLayer* layer, Setup const& setup, Input const* inputs, int count, int steps) {
+    return simulate(layer, setup, inputs, count, -1, steps, false);
 }
 
 bool splittable(PlayerObject* p) {
@@ -431,11 +531,13 @@ void markStopped() { g_stopped = true; }
 
 bool usePad(PlayerObject* ghost, GameObject* pad) {
     if (used(pad)) return true;
-    auto it = g_bump.find(static_cast<int>(pad->m_objectType));
-    if (it == g_bump.end()) return false; // never seen GD use this pad type yet
+    int type = static_cast<int>(pad->m_objectType);
+    if (!jumpPad(type)) return false;
+    auto seen = g_bumpSeen.find(bumpKey(ghost, type));
+    float bump = seen != g_bumpSeen.end() ? seen->second : bumpFor(ghost, pad->m_objectType);
     g_used.push_back(pad);
     g_info.pad = true;
-    ghost->bumpPlayer(it->second, static_cast<int>(pad->m_objectType), true, pad);
+    ghost->bumpPlayer(bump, type, true, pad);
     return true;
 }
 
@@ -443,14 +545,12 @@ bool useSpeedPortal(PlayerObject* ghost, GameObject* portal, float speed) {
     if (used(portal)) return true;
     g_used.push_back(portal);
     g_info.pad = true;
-    ghost->m_playerSpeed = speed;
+    ghost->updateTimeMod(speed, true);
     return true;
 }
 
 bool useGravityPortal(PlayerObject* ghost, GameObject* portal) {
     if (used(portal)) return true;
-    g_used.push_back(portal);
-    g_info.pad = true;
     bool flip = ghost->m_isUpsideDown;
     switch (portal->m_objectType) {
         case GameObjectType::InverseGravityPortal: flip = true; break;
@@ -458,8 +558,15 @@ bool useGravityPortal(PlayerObject* ghost, GameObject* portal) {
         case GameObjectType::GravityTogglePortal: flip = !ghost->m_isUpsideDown; break;
         default: return false;
     }
+    g_used.push_back(portal);
+    g_info.pad = true;
     if (flip != ghost->m_isUpsideDown) ghost->flipGravity(flip, true);
     return true;
+}
+
+void sawBump(PlayerObject* player, int objectType, float bumpMod) {
+    if (!player || !jumpPad(objectType)) return;
+    g_bumpSeen[bumpKey(player, objectType)] = bumpMod;
 }
 
 OrbUse useOrb(PlayerObject* ghost, GameObject* orb) {
@@ -467,7 +574,7 @@ OrbUse useOrb(PlayerObject* ghost, GameObject* orb) {
     int i = ghost == g_ghost[1] ? 1 : 0;
     if (used(orb)) return OrbUse::Ignored;
     if (!g_held[i]) return OrbUse::Ignored;      // no click, no orb
-    if (!g_ready[i]) return OrbUse::Unsupported; // held from before the check: can't tell if GD would use it
+    if (!g_ready[i]) return OrbUse::Unsupported; // held from before the run: can't tell if GD would use it
     auto effect = findOrb(orbKey(orb, ghost, ghost->m_isUpsideDown));
     if (!effect) return OrbUse::Unsupported; // never seen this orb in this mode yet
     g_used.push_back(orb);
@@ -489,22 +596,6 @@ void learnOrb(PlayerObject* p, GameObject* orb, double velocityBefore, bool flip
     g_orbs[key] = { p->m_yVelocity, flips };
     Mod::get()->setSavedValue<double>(key + "-v", p->m_yVelocity);
     Mod::get()->setSavedValue<bool>(key + "-f", flips);
-}
-
-void learnBump(int objectType, float bumpMod) {
-    loadBumps();
-    switch (static_cast<GameObjectType>(objectType)) {
-        case GameObjectType::YellowJumpPad:
-        case GameObjectType::PinkJumpPad:
-        case GameObjectType::RedJumpPad:
-            break;
-        default:
-            return;
-    }
-    auto it = g_bump.find(objectType);
-    if (it != g_bump.end() && std::abs(it->second - bumpMod) < 1e-4f) return;
-    g_bump[objectType] = bumpMod;
-    Mod::get()->setSavedValue<float>(fmt::format("bump-{}", objectType), bumpMod);
 }
 
 void track(GameObject* object, double clock) {
@@ -537,6 +628,37 @@ void track(GameObject* object, double clock) {
 void clearTracks() {
     g_tracks.clear();
     g_lastClock = 0.0;
+}
+
+bool snapshotsReady() {
+    return g_shelf != nullptr;
+}
+
+void takeSnapshot(PlayerObject* real, long long step, bool held, size_t inputs, float dt) {
+    if (!g_shelf || !real) return;
+    int i = g_snapNext;
+    g_snapNext = (g_snapNext + 1) % SNAPSHOTS;
+    auto& s = g_snaps[i];
+    if (!s.player) return;
+    mirror(s.player, real);
+    s.step = step;
+    s.held = held;
+    s.inputs = inputs;
+    s.dt = dt;
+    g_snapValid[i] = true;
+}
+
+Snapshot const* snapshotBefore(long long step) {
+    Snapshot const* best = nullptr;
+    for (int i = 0; i < SNAPSHOTS; ++i) {
+        if (!g_snapValid[i] || g_snaps[i].step > step) continue;
+        if (!best || g_snaps[i].step > best->step) best = &g_snaps[i];
+    }
+    return best;
+}
+
+void clearSnapshots() {
+    for (auto& v : g_snapValid) v = false;
 }
 
 } // namespace pb::ghost

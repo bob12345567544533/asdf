@@ -21,6 +21,7 @@ struct Config {
     bool popup = true;     // in-game timing popup
     bool practiceOnly = false;
     bool deathCheck = true; // say so when you die right after a held-back input
+    bool coach = true;      // after a death: how early / late the input was
     // how inputs are judged and fired (each can be switched off)
     bool finerTiming = true;   // delays in quarter ticks, fired inside a physics step
     bool bestFix = true;       // compare the safe delays and take the one that lives longest

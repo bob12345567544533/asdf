@@ -40,6 +40,7 @@ void loadConfig() {
     c.popup = flag("show-feedback");
     c.practiceOnly = flag("practice-only");
     c.deathCheck = flag("death-check");
+    c.coach = flag("coach");
     c.finerTiming = flag("finer-timing-v3");
     c.bestFix = flag("best-fix");
     c.confidence = flag("confidence-check");

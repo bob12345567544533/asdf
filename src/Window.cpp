@@ -80,15 +80,19 @@ constexpr uint32_t C_MUTED = 0x9a9a9a;
 constexpr uint32_t C_FAINT = 0x6a6a6a;
 constexpr uint32_t C_TRACK = 0x333333;
 constexpr uint32_t C_DANGER = 0xff6b6b;
+constexpr uint32_t C_LATE = 0xffb86b;  // coach: you were late
+constexpr uint32_t C_EARLY = 0x7cc4ff; // coach: you were early
 
 // Layout, in logical pixels (scaled for the monitor)
 constexpr float W = 454.f;
-constexpr float H = 680.f + 220.f; // + the per-mode grid (header 30, 4 rows of 46, gap 6)
+constexpr float H = 680.f + 220.f + 61.f; // + the per-mode grid (header 30, 4 rows of 46, gap 6) + the coach row
 constexpr float PAD = 22.f;
 constexpr float TITLE_H = 48.f;
 constexpr float STATS_Y = 49.f;
 constexpr float STATS_H = 60.f;
-constexpr float SLIDER_Y = STATS_Y + STATS_H + 1.f;
+constexpr float COACH_Y = STATS_Y + STATS_H + 1.f;
+constexpr float COACH_H = 60.f;
+constexpr float SLIDER_Y = COACH_Y + COACH_H + 1.f;
 constexpr float SLIDER_H = 82.f;
 constexpr float MODE_Y = SLIDER_Y + MAIN_SLIDERS * (SLIDER_H + 1.f);
 constexpr float MODE_HEAD = 30.f;
@@ -125,6 +129,7 @@ struct Values {
 struct Item {
     std::wstring time;
     std::wstring note; // set for plain notes ("Buffer on: ...")
+    int tone = Plain;  // ... and how they're coloured
     Save save;
 };
 
@@ -136,8 +141,9 @@ struct Attempt {
 };
 
 struct Event {
-    enum Type { Note, Saved, NewAttempt, Death, Accuracy } type = Note;
+    enum Type { Note, Saved, NewAttempt, Death, Accuracy, CoachStats } type = Note;
     Item item;
+    Coach coach;
     int number = 0;
     bool newLevel = false;
 };
@@ -157,6 +163,7 @@ int g_levelSaves = 0;
 double g_levelMs = 0.0;
 int g_checks = 0; // self-check: predictions compared this session
 int g_hits = 0;   // ... and how many were right
+Coach g_coach;    // the coach's numbers for this level
 int g_hover = -1;
 int g_dragging = -1;
 int g_focus = 0; // slider the arrow keys change
@@ -517,6 +524,31 @@ void paintStats(gp::Graphics& g) {
     hline(g, STATS_Y + STATS_H);
 }
 
+// The coach: how far off your timing was when you died (this level).
+void paintCoach(gp::Graphics& g) {
+    auto const& c = g_coach;
+    std::wstring values[4] {
+        c.early > 0 ? fmtw(L"%.0f ms", c.earlyMs / c.early) : std::wstring(L"–"),
+        c.late > 0 ? fmtw(L"%.0f ms", c.lateMs / c.late) : std::wstring(L"–"),
+        c.spot >= 0 ? fmtw(L"%d%%", c.spot) : std::wstring(L"–"),
+        c.calls > 0 ? fmtw(L"%d/%d", c.callHits, c.calls) : std::wstring(L"–"),
+    };
+    std::wstring labels[4] {
+        c.early > 0 ? fmtw(L"EARLY · %d×", c.early) : std::wstring(L"EARLY"),
+        c.late > 0 ? fmtw(L"LATE · %d×", c.late) : std::wstring(L"LATE"),
+        c.spot >= 0 ? fmtw(L"WORST · %d×", c.spotCount) : std::wstring(L"WORST SPOT"),
+        L"GHOST RIGHT",
+    };
+    uint32_t colors[4] { c.early > 0 ? C_EARLY : C_TEXT, c.late > 0 ? C_LATE : C_TEXT, C_TEXT, C_TEXT };
+    float colW = (W - 2 * PAD) / 4.f;
+    for (int i = 0; i < 4; ++i) {
+        float x = PAD + i * colW;
+        text(g, values[i], Face::Light, 22.f, col(colors[i]), box(x, COACH_Y + 6.f, colW, 28.f));
+        spaced(g, labels[i], Face::Ui, 9.5f, col(C_FAINT), box(x, COACH_Y + 34.f, colW, 18.f), 1.3f);
+    }
+    hline(g, COACH_Y + COACH_H);
+}
+
 void paintModeLimits(gp::Graphics& g) {
     spaced(g, L"PER MODE", Face::Ui, 11.f, col(C_MUTED), box(PAD, MODE_Y + 8.f, W - 2 * PAD, 18.f));
     for (int i = MAIN_SLIDERS; i < SLIDERS; ++i) {
@@ -589,7 +621,8 @@ void paintItem(gp::Graphics& g, Item const& it, int age, RectF r) {
     text(g, it.time, Face::Mono, 12.f, col(C_FAINT, alpha), box(r.X, r.Y, 62.f, r.Height));
     float x = r.X + 62.f;
     if (!it.note.empty()) {
-        text(g, it.note, Face::Mono, 12.f, col(C_MUTED, alpha), box(x, r.Y, r.X + r.Width - x, r.Height));
+        uint32_t color = it.tone == Late ? C_LATE : it.tone == Early ? C_EARLY : it.tone == Bad ? C_DANGER : C_MUTED;
+        text(g, it.note, Face::Mono, 12.f, col(color, alpha), box(x, r.Y, r.X + r.Width - x, r.Height));
         return;
     }
     auto const& s = it.save;
@@ -633,7 +666,8 @@ void paintLog(gp::Graphics& g) {
         }
     }
     if (!any && y + LH <= bottom) {
-        text(g, L"Nothing held back yet", Face::Ui, 12.f, col(C_MUTED), box(area.X, y, area.Width, LH));
+        text(g, L"Nothing yet: held-back clicks and what the coach finds show up here", Face::Ui, 12.f, col(C_MUTED),
+            box(area.X, y, area.Width, LH));
     }
 }
 
@@ -656,6 +690,7 @@ void paintScene(gp::Graphics& g) {
     }
     paintTitle(g);
     paintStats(g);
+    paintCoach(g);
     paintSliders(g);
     paintModeLimits(g);
     paintToggles(g);
@@ -745,6 +780,9 @@ void handleEvent(Event& e) {
             g_checks = e.number;
             g_hits = static_cast<int>(e.item.save.ticks);
             break;
+        case Event::CoachStats:
+            g_coach = e.coach;
+            break;
     }
 }
 
@@ -789,7 +827,15 @@ void place(HWND wnd, Values const& v) {
     int w = r.right - r.left;
     int h = r.bottom - r.top;
     if (v.hasPos && isOnScreen(v.x, v.y)) {
-        SetWindowPos(wnd, nullptr, v.x, v.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        // keep the bottom on its screen (the window got taller in 3.0)
+        int y = v.y;
+        POINT corner { v.x, v.y };
+        MONITORINFO info {};
+        info.cbSize = sizeof(info);
+        if (GetMonitorInfoW(MonitorFromPoint(corner, MONITOR_DEFAULTTONEAREST), &info) && y + h > info.rcWork.bottom) {
+            y = std::max<int>(info.rcWork.top, info.rcWork.bottom - h);
+        }
+        SetWindowPos(wnd, nullptr, v.x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         return;
     }
     RECT second {};
@@ -1227,12 +1273,21 @@ void sync() {
     if (!PostMessageW(wnd, WM_PB_SYNC, 0, reinterpret_cast<LPARAM>(values))) delete values;
 }
 
-void note(std::string const& line) {
+void note(std::string const& line, int tone) {
     if (!g_window.load()) return;
     auto e = new Event;
     e->type = Event::Note;
     e->item.time = timestamp();
     e->item.note = widen(line);
+    e->item.tone = tone;
+    post(e);
+}
+
+void coach(Coach const& stats) {
+    if (!g_window.load()) return;
+    auto e = new Event;
+    e->type = Event::CoachStats;
+    e->coach = stats;
     post(e);
 }
 
@@ -1281,7 +1336,8 @@ void toggle() { openSettingsPopup(Mod::get(), false); }
 void open() {}
 void prepare() {}
 void sync() {}
-void note(std::string const&) {}
+void note(std::string const&, int) {}
+void coach(Coach const&) {}
 void saved(Save const&) {}
 void attempt(int, bool) {}
 void death(int) {}

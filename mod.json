@@ -3,11 +3,11 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v2.4.0",
+	"version": "v3.0.0",
 	"id": "ai.predictivebuffer",
 	"name": "Predictive Input Buffer",
 	"developer": "lilWC",
-	"description": "Holds back a click that would kill you by a few ticks (as few as possible) and fires it when it is safe. Press and release, every mode.",
+	"description": "Holds back a click that would kill you by a few ticks (as few as possible) and fires it when it is safe. After a death, tells you how early or late you were.",
 	"settings": {
 		"enabled": {
 			"type": "bool",
@@ -67,6 +67,12 @@
 			"name": "Death Check",
 			"default": true,
 			"description": "When you die within 0.6 s of the buffer changing an input (about one jump), says so in game and in the window, so you know if it helped or hurt."
+		},
+		"coach": {
+			"type": "bool",
+			"name": "Coach",
+			"default": true,
+			"description": "After each death, plays your last moments again with the click a little earlier / later and tells you in the window how far off you were (\"click 13 ms late\"). Works even with the buffer switched off. Only ever writes text: it never touches an input. Takes effect from the next level you open."
 		},
 		"modes-title": {
 			"type": "title",
@@ -243,7 +249,7 @@
 			"type": "bool",
 			"name": "Use Pads And Portals",
 			"default": true,
-			"description": "The ghost uses yellow / pink / red pads, speed portals and gravity portals itself, so the buffer still helps near them. Pads start working once you've hit that pad type once."
+			"description": "The ghost uses yellow / pink / red pads, speed portals and gravity portals itself, so the buffer still helps near them."
 		},
 		"through-orbs": {
 			"type": "bool",
@@ -261,7 +267,7 @@
 			"type": "bool",
 			"name": "Self-Check",
 			"default": true,
-			"description": "After each held-back input, compares where the ghost said you'd be with where you really are. The window shows the accuracy, and a feature whose predictions keep missing turns itself off until you restart the game."
+			"description": "After every click the ghost looks at (held back or not), compares where it said you'd be with where you really are, and whether you died when it said you would. The window shows the accuracy, and a feature whose predictions keep missing turns itself off until you restart the game."
 		},
 		"fresh-ghost": {
 			"type": "bool",

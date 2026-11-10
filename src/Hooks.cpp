@@ -1,13 +1,17 @@
 // Predictive Input Buffer: when you click a little too early and a hidden ghost
 // run says that click kills you, the click is held back a few ticks (as little
-// as needed) and fired when it's safe.
+// as needed) and fired when it's safe. After a death the coach says how early
+// or late you were.
 //
 // Config   settings
-// Ghost    hidden player copies that run ahead
-// Buffer   holding inputs back and firing them
+// Ghost    hidden player copies that run ahead (and snapshots of the past)
+// Decide   picking the delay (no game code, tested on its own)
+// Buffer   holding inputs back and firing them, the self-check
+// Coach    what went wrong after a death
 // Window   the F7 window (Windows), Popup the in-game timing line
 
 #include "Buffer.hpp"
+#include "Coach.hpp"
 #include "Config.hpp"
 #include "Ghost.hpp"
 #include "Popup.hpp"
@@ -112,6 +116,15 @@ float speedOf(GameObject* obj) {
 // a ghost bump (it shouldn't: that's the level's job, not the player's).
 bool g_padsSafe = true;
 
+// Player 1's step was split for a held-back input: where it started (see updateRotation).
+bool g_didSplit = false;
+CCPoint g_splitFrom { 0.f, 0.f };
+
+bool isPlayLayer(GJBaseGameLayer* self) {
+    auto layer = PlayLayer::get();
+    return layer && static_cast<GJBaseGameLayer*>(layer) == self;
+}
+
 enum class Use { Used, Ignored, Unsupported };
 
 // The ghost touched something that isn't solid: use it if the ghost can.
@@ -193,7 +206,7 @@ class $modify(PBPlayLayer, PlayLayer) {
 
     void onQuit() {
         PlayLayer::onQuit();
-        pb::buffer::levelEnded();
+        pb::buffer::levelEnded(true);
     }
 
     void resetLevel() {
@@ -208,10 +221,7 @@ class $modify(PBPlayLayer, PlayLayer) {
         }
         PlayLayer::destroyPlayer(player, object);
         // only a real death drops what's held back (noclip calls this without dying)
-        if (player && player->m_isDead) {
-            if (player == m_player1) pb::buffer::died(this);
-            pb::buffer::reset();
-        }
+        if (player && player->m_isDead) pb::buffer::playerDied(this, player == m_player1);
         if (player == m_player1 && player->m_isDead) pb::window::death(levelPercent(this));
     }
 
@@ -224,7 +234,7 @@ class $modify(PBPlayLayer, PlayLayer) {
 class $modify(LevelEditorLayer) {
     bool init(GJGameLevel* level, bool noUI) {
         bool ok = LevelEditorLayer::init(level, noUI);
-        pb::buffer::levelEnded();
+        pb::buffer::levelEnded(false);
         return ok;
     }
 };
@@ -235,6 +245,30 @@ class $modify(GJBaseGameLayer) {
         (void)self.setHookPriority("GJBaseGameLayer::collisionCheckObjects", FIRST);
         (void)self.setHookPriority("GJBaseGameLayer::canBeActivatedByPlayer", FIRST);
         (void)self.setHookPriority("GJBaseGameLayer::playerTouchedRing", FIRST);
+        (void)self.setHookPriority("GJBaseGameLayer::gameEventTriggered", FIRST);
+    }
+
+    // Once a frame, after the physics steps: the coach works out the last death here
+    // (never from inside a step).
+    void update(float dt) {
+        GJBaseGameLayer::update(dt);
+        if (pb::ghost::running()) return;
+        auto layer = PlayLayer::get();
+        if (layer && static_cast<GJBaseGameLayer*>(layer) == static_cast<GJBaseGameLayer*>(this)) pb::coach::tick(layer, dt);
+    }
+
+    // The game's own collision check for player 1 ends each physics step (Click
+    // Between Frames' checks in the middle of a step don't deal damage).
+    int checkCollisions(PlayerObject* player, float dt, bool ignoreDamage) {
+        int result = GJBaseGameLayer::checkCollisions(player, dt, ignoreDamage);
+        if (!ignoreDamage && !pb::ghost::running() && isPlayLayer(this) && player == m_player1) pb::buffer::stepEnded();
+        return result;
+    }
+
+    // A ghost landing or jumping must never set off the level's event triggers.
+    void gameEventTriggered(GJGameEvent event, int material, int playerID) {
+        if (pb::ghost::running()) return;
+        GJBaseGameLayer::gameEventTriggered(event, material, playerID);
     }
 
     void handleButton(bool down, int button, bool isPlayer1) {
@@ -307,6 +341,7 @@ class $modify(PlayerObject) {
         (void)self.setHookPriority("PlayerObject::incrementJumps", FIRST);
         (void)self.setHookPriority("PlayerObject::ringJump", FIRST);
         (void)self.setHookPriority("PlayerObject::playBumpEffect", FIRST);
+        (void)self.setHookPriority("PlayerObject::tryPlaceCheckpoint", FIRST);
         // inside Click Between Frames' own update hook, so this sees each part of a step it splits
         (void)self.setHookPriority("PlayerObject::update", Priority::VeryLate);
     }
@@ -320,6 +355,8 @@ class $modify(PlayerObject) {
             // finer timing: the held-back input lands `split` of the way into this step,
             // split exactly like Click Between Frames splits a step (and like the ghost does)
             bool startedOnGround = m_isOnGround;
+            g_splitFrom = getPosition();
+            g_didSplit = true;
             PlayerObject::update(dt * split);
             pb::ghost::splitCollide(layer, this, startedOnGround, dt);
             pb::buffer::fireSplit(layer);
@@ -331,11 +368,31 @@ class $modify(PlayerObject) {
         pb::buffer::afterStep(layer, dt);
     }
 
-    // The real player used a pad: remember how hard GD bumps for it (the ghost
-    // bumps the same way). Ghost bumps never show effects.
+    // After a step this mod split, the game expects "where you were last step" to be
+    // where the whole step started (things that follow the player use it).
+    void updateRotation(float dt) {
+        PlayerObject::updateRotation(dt);
+        if (!g_didSplit || pb::ghost::running()) return;
+        auto layer = PlayLayer::get();
+        if (!layer || this != layer->m_player1) return;
+        g_didSplit = false;
+        m_lastPosition = g_splitFrom;
+    }
+
+    // The real player used a pad: note how hard GD bumped it (the ghost bumps the
+    // same way). Ghost bumps never show effects.
     void bumpPlayer(float bumpMod, int objectType, bool noEffects, GameObject* object) {
-        if (!pb::ghost::running()) pb::ghost::learnBump(objectType, bumpMod);
+        if (!pb::ghost::running()) {
+            auto layer = PlayLayer::get();
+            if (layer && (this == layer->m_player1 || this == layer->m_player2)) pb::ghost::sawBump(this, objectType, bumpMod);
+        }
         PlayerObject::bumpPlayer(bumpMod, objectType, noEffects, object);
+    }
+
+    // A ghost must never ask the level for a practice checkpoint.
+    void tryPlaceCheckpoint() {
+        if (pb::ghost::running()) return;
+        PlayerObject::tryPlaceCheckpoint();
     }
 
     void playBumpEffect(int objectType, GameObject* object) {
@@ -400,7 +457,7 @@ class $modify(HardStreak) {
 
 $on_mod(Loaded) {
     pb::loadConfig();
-    log::info("Predictive Input Buffer loaded. {} toggles the window, {} cycles 2 -> 4 -> 8 -> 16 ticks -> off.",
+    log::info("Predictive Input Buffer 3 loaded. {} toggles the window, {} cycles 2 -> 4 -> 8 -> 16 ticks -> off.",
         "F7", "F6");
 
     listenForKeybindSettingPresses("menu-key", [](Keybind const&, bool down, bool repeat, double) {
