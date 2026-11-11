@@ -265,6 +265,15 @@ class $modify(GJBaseGameLayer) {
         }
         auto line = pb::perf::frame();
         if (!line.empty()) pb::window::note(line, pb::window::Bad);
+        // every ~10 s: a stats line in the game's log, to find what makes a game slow down
+        static int frames = 0;
+        if (++frames >= 600) {
+            frames = 0;
+            auto children = layer->getChildren() ? layer->getChildren()->count() : 0;
+            auto objects = layer->m_objectLayer && layer->m_objectLayer->getChildren() ? layer->m_objectLayer->getChildren()->count() : 0;
+            log::info("stats: {:.2f} ms a frame in this mod, {} animations left on the ghosts, {} nodes in the level, {} in its object layer",
+                pb::perf::average(), pb::ghost::leftoverActions(), children, objects);
+        }
     }
 
     // The game's own collision check for player 1 ends each physics step (Click

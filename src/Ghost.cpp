@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -662,6 +663,21 @@ void track(GameObject* object, double clock) {
 void clearTracks() {
     g_tracks.clear();
     g_lastClock = 0.0;
+}
+
+int leftoverActions() {
+    int n = 0;
+    auto am = CCDirector::get()->getActionManager();
+    std::function<void(CCNode*, int)> count = [&](CCNode* node, int depth) {
+        if (!node || depth > 6) return;
+        n += static_cast<int>(am->numberOfRunningActionsInTarget(node));
+        if (auto kids = node->getChildren()) {
+            for (auto kid : CCArrayExt<CCNode*>(kids)) count(kid, depth + 1);
+        }
+    };
+    count(g_ghost[0], 0);
+    count(g_ghost[1], 0);
+    return n;
 }
 
 bool snapshotsReady() {

@@ -65,6 +65,7 @@ struct Timer {
     long long start;
 };
 std::string frame();
+double average(); // ms a frame, smoothed
 }
 
 // Toggle key: cycles 2 -> 4 -> 8 -> 16 ticks -> off and saves it to the

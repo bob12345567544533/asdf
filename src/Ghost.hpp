@@ -117,6 +117,8 @@ struct Snapshot {
     size_t inputs = 0;   // inputs logged before it
     float dt = 0.25f;
 };
+// For the stats line in the log: animations still running on the ghosts.
+int leftoverActions();
 bool snapshotsReady();
 void takeSnapshot(PlayerObject* real, long long step, bool held, size_t inputs, float dt);
 // The newest snapshot taken at or before `step` (null = none).

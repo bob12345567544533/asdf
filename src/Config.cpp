@@ -95,6 +95,8 @@ Timer::~Timer() {
     if (start >= 0) g_spent += now() - start;
 }
 
+double average() { return g_avg; }
+
 std::string frame() {
     double ms = g_spent / 1000.0;
     g_spent = 0;
