@@ -28,6 +28,7 @@ constexpr int MAX_REPLAY = 420;  // steps: further back than this it isn't worth
 constexpr double LATE_WAIT = 0.2; // seconds after the death a click still counts as "the late click"
 constexpr double SLICE_MS = 3.0; // work per frame
 constexpr double RESET_MS = 8.0; // ... and at most this much right before a restart
+constexpr int MAX_REPLAYS = 70;  // replays per death, at most
 
 struct Rec {
     double time = 0.0;
@@ -63,6 +64,7 @@ struct Job {
     int suspect = -1;               // the input in `real` that most likely killed you
     bool pairRelease = false;       // its release moves along with it
     int candidate = 0;
+    int replays = 0;
     // what came out
     bool found = false;
     bool fromNew = false; // no input of yours could be moved: a new one would have saved it
@@ -164,6 +166,10 @@ void finish() {
 // One replay.
 void work(PlayLayer* layer) {
     auto& j = g_job;
+    if (++j.replays > MAX_REPLAYS && j.stage != Stage::Wait) {
+        j.stage = Stage::Done;
+        return;
+    }
     switch (j.stage) {
         case Stage::Gate: {
             // Play it again as it happened: only if the ghost dies where you died
@@ -391,6 +397,10 @@ void lateInput(bool down) {
 void tick(PlayLayer* layer, float dt) {
     auto& j = g_job;
     if (!j.active) return;
+    if (!config().coach) {
+        g_job = {};
+        return;
+    }
     if (!layer || layer != g_layer || !ghost::ready()) {
         g_job = {};
         return;

@@ -51,9 +51,21 @@ Config const& config();
 void loadConfig();
 
 // The self-check found a feature's predictions keep missing: off until the game restarts.
-enum class Feature { Finer, Remainder, Moving, Pads, Orbs, Count };
+enum class Feature { Finer, Remainder, Moving, Pads, Orbs, Coach, Count };
 void disableForSession(Feature feature);
 char const* featureName(Feature feature);
+
+// How long the mod's own work takes (main thread). A Timer adds its time when it
+// ends; frame() once a frame returns a line to show when the mod got too slow and
+// switched the coach off (empty otherwise).
+namespace perf {
+struct Timer {
+    Timer();
+    ~Timer();
+    long long start;
+};
+std::string frame();
+}
 
 // Toggle key: cycles 2 -> 4 -> 8 -> 16 ticks -> off and saves it to the
 // settings. Returns a short line describing the new stage.

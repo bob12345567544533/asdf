@@ -258,7 +258,13 @@ class $modify(GJBaseGameLayer) {
         GJBaseGameLayer::update(dt);
         if (pb::ghost::running()) return;
         auto layer = PlayLayer::get();
-        if (layer && static_cast<GJBaseGameLayer*>(layer) == static_cast<GJBaseGameLayer*>(this)) pb::coach::tick(layer, dt);
+        if (!layer || static_cast<GJBaseGameLayer*>(layer) != static_cast<GJBaseGameLayer*>(this)) return;
+        {
+            pb::perf::Timer timer;
+            pb::coach::tick(layer, dt);
+        }
+        auto line = pb::perf::frame();
+        if (!line.empty()) pb::window::note(line, pb::window::Bad);
     }
 
     // The game's own collision check for player 1 ends each physics step (Click
@@ -286,7 +292,12 @@ class $modify(GJBaseGameLayer) {
         if (!layer || static_cast<GJBaseGameLayer*>(layer) != static_cast<GJBaseGameLayer*>(this)) {
             return GJBaseGameLayer::handleButton(down, button, isPlayer1);
         }
-        if (pb::buffer::take(layer, down, isPlayer1)) return;
+        bool taken;
+        {
+            pb::perf::Timer timer;
+            taken = pb::buffer::take(layer, down, isPlayer1);
+        }
+        if (taken) return;
         GJBaseGameLayer::handleButton(down, button, isPlayer1);
     }
 
@@ -357,7 +368,11 @@ class $modify(PlayerObject) {
         if (pb::ghost::running()) return PlayerObject::update(dt);
         auto layer = PlayLayer::get();
         if (!layer || this != layer->m_player1) return PlayerObject::update(dt);
-        float split = pb::buffer::beforeStep(layer, dt);
+        float split;
+        {
+            pb::perf::Timer timer;
+            split = pb::buffer::beforeStep(layer, dt);
+        }
         if (split > 0.f && split < 1.f) {
             // finer timing: the held-back input lands `split` of the way into this step,
             // split exactly like Click Between Frames splits a step (and like the ghost does)

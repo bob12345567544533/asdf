@@ -286,6 +286,27 @@ void makeSnapshots(PlayLayer* layer) {
 // One run
 // ---------------------------------------------------------------------------
 
+// Nothing a ghost started may keep running once its run is over: animations it set
+// off (rotations, squish, robot / spider sprites) and particles would otherwise pile
+// up run after run, and the game would get slower and slower.
+void stopActions(CCNode* node, int depth = 0) {
+    if (!node || depth > 6) return;
+    node->stopAllActions();
+    if (auto kids = node->getChildren()) {
+        for (auto kid : CCArrayExt<CCNode*>(kids)) stopActions(kid, depth + 1);
+    }
+}
+
+void quiet(PlayerObject* p) {
+    if (!p) return;
+    stopActions(p);
+    for (auto ps : { p->m_playerGroundParticles, p->m_trailingParticles, p->m_shipClickParticles, p->m_vehicleGroundParticles,
+                     p->m_ufoClickParticles, p->m_robotBurstParticles, p->m_dashParticles, p->m_swingBurstParticles1,
+                     p->m_swingBurstParticles2, p->m_landParticles0, p->m_landParticles1 }) {
+        if (ps && ps->isActive()) ps->stopSystem();
+    }
+}
+
 struct RunGuard {
     RunGuard() {
         g_running = true;
@@ -296,7 +317,11 @@ struct RunGuard {
         g_used.clear();
         g_info = {};
     }
-    ~RunGuard() { g_running = false; }
+    ~RunGuard() {
+        g_running = false;
+        quiet(g_ghost[0]);
+        quiet(g_ghost[1]);
+    }
 };
 
 // `judge`: the input after which steps are counted (-1 = from the very start).
@@ -601,6 +626,15 @@ void learnOrb(PlayerObject* p, GameObject* orb, double velocityBefore, bool flip
 void track(GameObject* object, double clock) {
     if (!object) return;
     g_lastClock = std::max(g_lastClock, clock);
+    // forget objects not seen around the player for a while (long attempts would pile them up)
+    static double pruned = 0.0;
+    if (g_lastClock - pruned > 2.0 || g_lastClock < pruned) {
+        pruned = g_lastClock;
+        for (auto it = g_tracks.begin(); it != g_tracks.end();) {
+            if (it->second.clock < g_lastClock - 2.0) it = g_tracks.erase(it);
+            else ++it;
+        }
+    }
     auto& t = g_tracks[object];
     double x = object->m_positionX;
     double y = object->m_positionY;
@@ -641,6 +675,7 @@ void takeSnapshot(PlayerObject* real, long long step, bool held, size_t inputs, 
     auto& s = g_snaps[i];
     if (!s.player) return;
     mirror(s.player, real);
+    quiet(s.player);
     s.step = step;
     s.held = held;
     s.inputs = inputs;
